@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+REA_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+REA_NODE=/Users/gaoxs/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node
+exec "$REA_NODE" "$REA_ROOT/.tools/rea/node_modules/rea-agents/scripts/rea.mjs" "$@"

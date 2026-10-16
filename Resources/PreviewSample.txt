@@ -1,0 +1,4 @@
+Pasteboard Quick Look 验收文件
+
+这是一份应用自带的演示文件，不包含用户数据。
+文件剪贴板保留文件引用；Quick Look 可以直接预览原文件。

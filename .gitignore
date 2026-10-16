@@ -1,0 +1,7 @@
+.tools/
+.DS_Store
+.build/
+dist/
+analysis/
+.omx/
+.claude/
