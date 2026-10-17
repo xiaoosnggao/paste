@@ -4,10 +4,9 @@ import PasteCore
 struct ToolOperations: Sendable {
     var recognize: @Sendable (Data, CloudToolConfiguration) async throws -> CloudOCRResponse
     var translate: @Sendable (String, CloudToolConfiguration) async throws -> CloudTranslationResponse
-    static func live() -> Self {
-        let service = CloudToolsService()
+    static func live(service: CloudToolsService = CloudToolsService()) -> Self {
         return .init(recognize: { data, configuration in
-            if configuration.ocrProvider == .system { return try await service.recognize(image: data, configuration: configuration) }
+            if configuration.ocrProvider == .system && configuration.ocrAIServiceID == nil { return try await service.recognize(image: data, configuration: configuration) }
             let work = Task.detached(priority: .utility) { try OCRImagePreparation.uploadData(data) }
             let payload = try await withTaskCancellationHandler(operation: { try await work.value }, onCancel: { work.cancel() })
             return try await service.recognize(image: payload, configuration: configuration)
@@ -17,7 +16,55 @@ struct ToolOperations: Sendable {
 }
 
 extension AppModel {
+    func cancelAutoTranslation() {
+        autoTranslationGeneration = UUID()
+        autoTranslationTask?.cancel()
+        autoTranslationTask = nil
+    }
+
+    /// Only native user edits call this; OCR and card loading never schedule uploads.
+    func editToolInput(_ text: String, isComposing: Bool) {
+        cancelAutoTranslation()
+        if toolBusy && (toolInputText != text || isComposing) { cancelToolOperation() }
+        if toolInputText != text { toolError = nil; toolStatus = nil }
+        toolInputIsComposing = isComposing
+        toolInputText = text
+        guard !isComposing, !isPasting, !toolBusy,
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        guard text.utf8.count <= 2 * 1024 * 1024 else { toolError = "文字超过 2 MB，请分段翻译。"; return }
+        let configuration = toolConfiguration, itemID = toolItemID
+        if let completed = completedToolTranslation, completed.text == text,
+           completed.configuration.hasSameToolSettings(as: configuration), completed.itemID == itemID,
+           activeToolItem?.enrichment?.translation?.sourceText == text { return }
+        let revision = autoTranslationGeneration, generation = toolGeneration
+        let delay = autoTranslationDelayNanoseconds
+        autoTranslationTask = Task { @MainActor [weak self] in
+            do { try await Task.sleep(nanoseconds: delay) } catch { return }
+            guard let self, !Task.isCancelled, self.autoTranslationGeneration == revision else { return }
+            self.autoTranslationTask = nil
+            guard self.toolGeneration == generation, self.toolInputText == text, self.toolItemID == itemID,
+                  self.toolConfiguration.hasSameToolSettings(as: configuration), !self.toolBusy, !self.isPasting else { return }
+            self.translateToolInput()
+        }
+    }
+
     var activeToolItem: ClipItem? { toolItemID.flatMap { id in snapshot.items.first { $0.id == id } } }
+    var toolTranslationIsStale: Bool {
+        guard let translation = activeToolItem?.enrichment?.translation else { return false }
+        return translation.sourceText != toolInputText || translation.sourceLanguage != toolConfiguration.sourceLanguage
+            || translation.targetLanguage != toolConfiguration.targetLanguage || translation.provider != toolConfiguration.translationProviderTitle
+    }
+    /// All settings surfaces share this path. Initial configuration loading has no active input.
+    func refreshToolAfterConfigurationChange(recognizeImage: Bool) {
+        guard toolSessionActive, !toolInputIsComposing, !isPasting,
+              activeToolItem?.kind == .image || !toolInputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        cancelToolOperation()
+        if recognizeImage, let item = activeToolItem, item.kind == .image {
+            recognizeItem(item, translateAfter: true)
+        } else {
+            translateToolInput()
+        }
+    }
     var toolSourceText: String {
         guard let item = activeToolItem else { return toolInputText }
         return item.enrichment?.ocr?.text ?? item.text
@@ -27,7 +74,7 @@ extension AppModel {
         onToolStart?()
         switch action {
         case .screenshotOCR, .screenshotTranslate:
-            lastToolOperation = action; onScreenshotTool?(action == .screenshotTranslate)
+            lastToolOperation = .screenshotTranslate; onScreenshotTool?(true)
         case .selectionTranslate:
             cancelToolOperation(); toolItemID = nil; toolInputText = ""; toolStatus = nil; toolError = nil
             lastToolOperation = action; onSelectionTool?()
@@ -35,6 +82,7 @@ extension AppModel {
             cancelToolOperation(); toolItemID = nil; toolInputText = ""; toolStatus = nil; toolError = nil
             lastToolOperation = action; onShowTools?()
         case .clipboardTranslate:
+            lastToolOperation = action
             // Only this explicit command reads current clipboard text. No history is uploaded.
             guard let text = bridge.currentText, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 cancelToolOperation(); toolItemID = nil; toolInputText = ""; toolError = "剪贴板中没有可翻译的文字。"; onShowTools?(); return
@@ -56,6 +104,7 @@ extension AppModel {
         cancelToolOperation()
         guard let current = snapshot.items.first(where: { $0.id == item.id }) else { return }
         toolItemID = current.id; toolInputText = current.enrichment?.ocr?.text ?? current.text
+        lastToolOperation = current.kind == .image ? .screenshotTranslate : .inputTranslate
         toolStatus = nil; toolError = nil; onShowTools?()
     }
     @discardableResult
@@ -67,7 +116,7 @@ extension AppModel {
         showToolItem(stored); recognizeItem(stored, translateAfter: translateAfter)
         return stored.id
     }
-    func recognizeItem(_ item: ClipItem, translateAfter: Bool = false) {
+    func recognizeItem(_ item: ClipItem, translateAfter: Bool = true) {
         showToolItem(item)
         guard let current = activeToolItem, let data = Self.imageData(current) else { toolError = "此卡片不包含图片。"; return }
         cancelToolOperation(); toolBusy = true; toolStatus = "正在识别文字…"; toolError = nil
@@ -83,14 +132,20 @@ extension AppModel {
                       var live = self.snapshot.items.first(where: { $0.id == input.id }),
                       live.fingerprint == input.fingerprint, live.enrichment == input.enrichment,
                       self.toolInputText == (input.enrichment?.ocr?.text ?? input.text),
-                      self.toolConfiguration == configuration else { return }
+                      self.toolConfiguration.hasSameToolSettings(as: configuration) else { return }
+                guard !response.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    self.toolError = "未识别到文字，请重新截图。"; self.toolStatus = nil; return
+                }
+                guard response.text.utf8.count <= 2 * 1024 * 1024 else {
+                    self.toolError = "文字超过 2 MB，请分段识别。"; self.toolStatus = nil; return
+                }
                 var enrichment = live.enrichment ?? .init()
                 enrichment.ocr = .init(text: response.text, provider: configuration.ocrProviderTitle)
                 live.enrichment = enrichment
                 guard self.saveDerivedResult(response.text, source: live, operation: .ocr, provider: configuration.ocrProviderTitle, action: "保存识别结果") else {
                     self.toolError = self.toolError ?? self.statusMessage ?? "识别完成，但卡片未保存。"; return
                 }
-                self.toolInputText = response.text; self.toolStatus = "原图与识别文字已保存为独立卡片。"
+                self.toolInputText = response.text; self.toolStatus = nil
                 if translateAfter {
                     self.lastToolOperation = .inputTranslate
                     self.toolStatus = "正在翻译…"
@@ -103,18 +158,30 @@ extension AppModel {
             catch { if self.toolGeneration == generation { self.toolError = error.localizedDescription; self.toolStatus = nil } }
         }
     }
-    func translateItem(_ item: ClipItem) { showToolItem(item); translateToolInput() }
+    func translateItem(_ item: ClipItem) {
+        showToolItem(item)
+        if let current = activeToolItem, current.kind == .image, current.enrichment?.ocr == nil {
+            recognizeItem(current, translateAfter: true)
+        } else { translateToolInput() }
+    }
     func translateToolInput() {
+        cancelAutoTranslation()
+        toolInputIsComposing = false
         guard !toolBusy else { return }
         let input = toolInputText
+        if input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           let item = activeToolItem, item.kind == .image {
+            recognizeItem(item, translateAfter: true)
+            return
+        }
+        lastToolOperation = .inputTranslate
         guard !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { toolError = "请输入文字，或先识别图片。"; return }
         guard input.utf8.count <= 2 * 1024 * 1024 else { toolError = "文字超过 2 MB，请分段翻译。"; return }
         cancelToolOperation(); toolError = nil
         let item: ClipItem
-        if let current = activeToolItem {
+        if activeToolItem != nil {
             guard saveToolInput() else { return }
             guard let updated = activeToolItem else { return }; item = updated
-            if current.kind == .image && current.enrichment?.ocr == nil { toolStatus = "输入内容已保存为识别文字。" }
         } else {
             let created = ClipItem(title: String(input.prefix(80)), text: input, kind: .text,
                                    sourceBundleID: Bundle.main.bundleIdentifier ?? "com.gaoxs.pasteboard", sourceName: "输入翻译",
@@ -124,7 +191,6 @@ extension AppModel {
         }
         let generation = toolGeneration, configuration = toolConfiguration
         toolBusy = true; toolStatus = "正在翻译…"
-        lastToolOperation = .inputTranslate
         toolTask = Task { @MainActor [weak self] in
             guard let self else { return }
             defer { if self.toolGeneration == generation { self.toolBusy = false; self.toolTask = nil } }
@@ -140,14 +206,15 @@ extension AppModel {
     private func applyTranslation(_ response: CloudTranslationResponse, input: String, item: ClipItem, configuration: CloudToolConfiguration) {
         guard var live = snapshot.items.first(where: { $0.id == item.id }), live.fingerprint == item.fingerprint,
               (live.enrichment?.ocr?.text ?? live.text) == input,
-              toolInputText == input, toolConfiguration == configuration else { toolStatus = "原文或设置已更改，请重新翻译。"; return }
+              toolInputText == input, toolConfiguration.hasSameToolSettings(as: configuration) else { toolStatus = "原文或设置已更改，请重新翻译。"; return }
         var enrichment = live.enrichment ?? .init()
         enrichment.translation = .init(sourceText: input, translatedText: response.text,
                                        sourceLanguage: configuration.sourceLanguage, targetLanguage: configuration.targetLanguage,
                                        provider: configuration.translationProviderTitle, model: response.model)
         live.enrichment = enrichment
         guard saveDerivedResult(response.text, source: live, operation: .translation, provider: configuration.translationProviderTitle, action: "保存译文卡片") else { return }
-        toolStatus = "原文与译文已保存为独立卡片。"
+        completedToolTranslation = (input, configuration, live.id)
+        toolStatus = nil
     }
     @discardableResult
     private func saveDerivedResult(_ text: String, source: ClipItem, operation: ClipDerivation.Operation, provider: String, action: String) -> Bool {
@@ -211,11 +278,14 @@ extension AppModel {
         catch { toolError = error.localizedDescription }
     }
     func cancelToolOperation() {
+        cancelAutoTranslation()
+        toolInputIsComposing = false
         if toolBusy { toolStatus = "已取消，原始内容已保留。" }
         toolGeneration = UUID(); toolTask?.cancel(); toolTask = nil; toolBusy = false
     }
     func retryToolOperation() {
         guard !toolBusy else { return }
+        if lastToolOperation == .clipboardTranslate { performTool(.clipboardTranslate); return }
         if lastToolOperation == .selectionTranslate { performTool(.selectionTranslate); return }
         if lastToolOperation == .screenshotOCR || lastToolOperation == .screenshotTranslate {
             if let item = activeToolItem { recognizeItem(item, translateAfter: lastToolOperation == .screenshotTranslate) }

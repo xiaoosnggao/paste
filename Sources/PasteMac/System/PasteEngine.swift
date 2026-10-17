@@ -1,20 +1,21 @@
 import AppKit
 import ApplicationServices
 
-// Every failure is distinguishable from copy-only mode; callers keep the clip copied.
+// Dispatch reasons stay distinct; callers treat missing destinations as copy-only.
 enum PasteIssue: Equatable, Error {
     case accessibilityPermissionRequired, noTarget, targetUnavailable, focusNotRestored, eventUnavailable
     case focusQueryUnavailable, capturedFocusQueryUnavailable, noEditableTarget, pasteActionUncertain
+    var usesCopyOnlyFallback: Bool { self == .noTarget || self == .noEditableTarget }
     var message: String {
         switch self {
         case .accessibilityPermissionRequired: return "内容已复制。请开启辅助功能权限以使用直接粘贴。"
-        case .noTarget: return "请先点击目标输入框，再使用快捷键打开剪贴板。"
+        case .noTarget: return "已复制"
         case .targetUnavailable: return "目标应用已退出。内容已复制，可在其他应用中按 ⌘V 粘贴。"
         case .focusNotRestored: return "无法切回目标输入框。内容已复制，请点击输入框后按 ⌘V 粘贴。"
         case .eventUnavailable: return "无法完成直接粘贴。内容已复制，请按 ⌘V 粘贴。"
         case .focusQueryUnavailable: return "无法确认当前输入位置。内容已复制，请点击输入框后按 ⌘V 粘贴。"
         case .capturedFocusQueryUnavailable: return "无法确认目标输入框。内容已复制，请点击输入框后按 ⌘V 粘贴。"
-        case .noEditableTarget: return "当前无法粘贴。内容已复制，请点击输入框后重试。"
+        case .noEditableTarget: return "已复制"
         case .pasteActionUncertain: return "无法确认粘贴是否完成。请先检查输入框，以免重复粘贴。"
         }
     }

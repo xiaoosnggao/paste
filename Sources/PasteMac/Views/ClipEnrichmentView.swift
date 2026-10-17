@@ -6,6 +6,7 @@ struct ClipEnrichmentView: View {
     @ObservedObject var model: AppModel
     let item: ClipItem
     @State private var editingOCR = false
+    @FocusState private var ocrFocused: Bool
     @State private var ocrDraft = ""
     @State private var editingSource = ""
     private var current: ClipItem? { model.snapshot.items.first { $0.id == item.id } }
@@ -17,7 +18,7 @@ struct ClipEnrichmentView: View {
         let translation = configuration.translationProvider == .system
             ? "系统翻译可能需要下载语言资源。"
             : "原文将发送至\(configuration.translationProviderTitle)。"
-        return (item.kind == .image ? ocr : "") + translation + "原始内容与结果分别保存为卡片。"
+        return (item.kind == .image ? ocr : "") + translation
     }
     var body: some View {
         if let value = current {
@@ -82,7 +83,9 @@ struct ClipEnrichmentView: View {
             }.controlSize(.small)
             if editingOCR {
                 TextEditor(text: $ocrDraft).font(.system(size: 13)).frame(minHeight: 90, maxHeight: 150)
-                    .overlay(RoundedRectangle(cornerRadius: 5).stroke(.secondary.opacity(0.25)))
+                    .scrollContentBackground(.hidden).padding(6).focused($ocrFocused)
+                    .modifier(PasteboardInputSurface(focused: ocrFocused))
+                    .background(InputFocusOnAppear { ocrFocused = true }.frame(width: 0, height: 0))
                 if text != editingSource { Text("识别文字已更新，请取消后重新编辑。").font(.caption).foregroundStyle(.orange) }
             } else { Text(text).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
         }

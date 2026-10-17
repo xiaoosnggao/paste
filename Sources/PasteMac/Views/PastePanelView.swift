@@ -6,8 +6,8 @@ struct PastePanelView: View {
     @ObservedObject var model: AppModel
     @State private var renamingBoard: UUID?
     @State private var renameText = ""
-    @FocusState private var searchFocused: Bool
-    @FocusState private var boardNameFocused: UUID?
+    @State private var searchFocused = false
+    @State private var boardNameFocused: UUID?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -73,17 +73,8 @@ struct PastePanelView: View {
                     Button("重试保存", action: model.retrySave).buttonStyle(.plain).foregroundStyle(Color.accentColor)
                 } else if let failure = model.pasteFailureText {
                     Label(failure, systemImage: "exclamationmark.circle").foregroundStyle(.orange).lineLimit(1).help(failure)
-                    if case .accessibilityPermissionRequired? = model.pasteIssue {
-                        Button("设置直接粘贴…", action: model.requestDirectPastePermission)
-                            .buttonStyle(.plain).focusEffectDisabled().foregroundStyle(Color.accentColor)
-                    }
-                } else if model.snapshot.preferences.pasteToFrontmost && !model.directPastePermissionGranted {
-                    Label(model.hasCheckedDirectPastePermission ? "直接粘贴未授权" : "使用直接粘贴时将检查权限", systemImage: "info.circle")
-                        .foregroundStyle(.secondary).lineLimit(1)
-                    Button("设置直接粘贴…", action: model.requestDirectPastePermission)
-                        .buttonStyle(.plain).focusEffectDisabled().foregroundStyle(Color.accentColor)
                 } else {
-                    Text(model.statusMessage ?? (model.isPaused ? "剪贴板收集已暂停" : "\(model.visibleItems.count) 个项目"))
+                    Text(model.statusMessage ?? (model.isPaused ? "剪贴板记录已暂停" : "\(model.visibleItems.count) 张卡片"))
                 }
                 Spacer()
                 ViewThatFits(in: .horizontal) {
@@ -106,6 +97,7 @@ struct PastePanelView: View {
                         Image(systemName: "sparkles").font(.system(size: 15)).frame(width: 32, height: 32).contentShape(Rectangle())
                             .foregroundStyle(model.usesRecommendations ? Color.accentColor : Color.primary)
                     }.buttonStyle(.plain).focusEffectDisabled().help("按当前应用和最近使用情况推荐")
+                    .accessibilityValue(model.usesRecommendations ? "已开启" : "未开启")
                     Button { model.isSearchVisible.toggle() } label: {
                         Image(systemName: "magnifyingglass").font(.system(size: 15, weight: .medium)).frame(width: 32, height: 32).contentShape(Rectangle())
                     }.buttonStyle(.plain).focusEffectDisabled().help("搜索 ⌘F")
@@ -114,10 +106,12 @@ struct PastePanelView: View {
                             .font(.system(size: 12, weight: .medium)).frame(width: 64, height: 32).contentShape(Rectangle())
                     }.buttonStyle(.plain).focusEffectDisabled().help("截图识别")
                     if model.isSearchVisible {
-                        TextField("搜索剪贴板", text: $model.queryString)
-                            .textFieldStyle(.plain).focused($searchFocused).frame(width: searchWidth, height: 32)
-                            .onSubmit { model.activateSelected(plainText: NSEvent.modifierFlags.contains(.shift)) }
-                            .onExitCommand { model.isSearchVisible = false; model.queryString = ""; searchFocused = false }
+                        PanelInputField(placeholder: "搜索剪贴板", text: $model.queryString, focused: $searchFocused,
+                                        onSubmit: { model.activateSelected(plainText: NSEvent.modifierFlags.contains(.shift)) },
+                                        onCancel: { model.isSearchVisible = false; model.queryString = ""; searchFocused = false })
+                            .padding(.horizontal, 9).frame(width: searchWidth, height: 32)
+                            .modifier(PasteboardInputSurface(focused: searchFocused))
+                            .onAppear { searchFocused = true }
                         filterMenu
                     }
                     ScrollView(.horizontal) {
@@ -125,10 +119,13 @@ struct PastePanelView: View {
                             boardPill("剪贴板", id: nil, color: .blue)
                             ForEach(model.snapshot.pinboards) { board in
                                 if renamingBoard == board.id {
-                                    TextField("名称", text: $renameText).textFieldStyle(.roundedBorder).frame(width: 115, height: 32)
-                                        .focused($boardNameFocused, equals: board.id)
-                                        .onSubmit { finishRename(board.id) }
-                                        .onExitCommand { renamingBoard = nil; boardNameFocused = nil }
+                                    PanelInputField(placeholder: "名称", text: $renameText,
+                                                    focused: Binding(get: { boardNameFocused == board.id },
+                                                                     set: { boardNameFocused = $0 ? board.id : nil }),
+                                                    onSubmit: { finishRename(board.id) },
+                                                    onCancel: { renamingBoard = nil; boardNameFocused = nil })
+                                        .padding(.horizontal, 9).frame(width: 115, height: 32)
+                                        .modifier(PasteboardInputSurface(focused: boardNameFocused == board.id))
                                 } else {
                                     boardPill(board.name, id: board.id, color: Color(hex: board.colorHex))
                                         .contextMenu {
@@ -186,29 +183,41 @@ struct PastePanelView: View {
     }
 
     private func boardPill(_ title: String, id: UUID?, color: Color) -> some View {
-        Button { model.selectedPinboardID = id; model.selectedIDs = [] } label: {
+        let selected = model.selectedPinboardID == id
+        return Button { model.selectedPinboardID = id; model.selectedIDs = [] } label: {
             HStack(spacing: 6) {
-                if id != nil { Circle().fill(color).frame(width: 7, height: 7) }
-                Text(title).font(.system(size: 12, weight: .semibold)).lineLimit(1).truncationMode(.tail)
-            }.padding(.horizontal, 13).frame(height: 32).frame(maxWidth: 160)
-                .background(model.selectedPinboardID == id ? Color.white.opacity(0.19) : Color.clear, in: Capsule())
-        }.buttonStyle(.plain).focusEffectDisabled().help(title)
+                if id != nil {
+                    Circle().fill(color).frame(width: 7, height: 7)
+                        .overlay(Circle().strokeBorder(selected ? Color.white.opacity(0.8) : .clear, lineWidth: 1))
+                }
+                Text(title).font(.system(size: 12, weight: selected ? .semibold : .medium))
+                    .lineLimit(1).truncationMode(.tail)
+            }
+            .foregroundStyle(selected ? Color.white : Color.primary)
+            .padding(.horizontal, 13).frame(height: 32).frame(maxWidth: 160)
+            .background(selected ? Color.accentColor : Color.primary.opacity(0.045), in: Capsule())
+            .overlay(Capsule().strokeBorder(selected ? Color.white.opacity(0.18) : Color.primary.opacity(0.09), lineWidth: 0.75))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain).focusEffectDisabled().help(title)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityValue(selected ? "已选中" : "")
     }
 
     private var filterMenu: some View {
         Menu {
-            Menu("类型") {
-                Button("所有类型") { model.filter.kind = nil }
+            Picker("类型", selection: $model.filter.kind) {
+                Text("所有类型").tag(Optional<ClipKind>.none)
                 ForEach(ClipKind.allCases, id: \.self) { kind in
-                    Button { model.filter.kind = kind } label: { Label(kind.displayName, systemImage: kind.symbolName) }
+                    Label(kind.displayName, systemImage: kind.symbolName).tag(Optional(kind))
                 }
-            }
-            Menu("应用") {
-                Button("所有应用") { model.filter.sourceBundleID = nil }
+            }.pickerStyle(.menu)
+            Picker("应用", selection: $model.filter.sourceBundleID) {
+                Text("所有应用").tag(Optional<String>.none)
                 ForEach(sources, id: \.sourceBundleID) { item in
-                    Button(item.sourceName.isEmpty ? item.sourceBundleID : item.sourceName) { model.filter.sourceBundleID = item.sourceBundleID }
+                    Text(item.sourceName.isEmpty ? item.sourceBundleID : item.sourceName).tag(Optional(item.sourceBundleID))
                 }
-            }
+            }.pickerStyle(.menu)
             Menu("日期") {
                 Button("所有时间") { model.filter.since = nil }
                 Button("今天") { model.filter.since = Calendar.current.startOfDay(for: Date()) }
@@ -232,7 +241,7 @@ struct PastePanelView: View {
     private var appMenu: some View {
         Menu {
             Button("新建文本", action: model.newText)
-            Button("Paste Stack", action: model.showStack)
+            Button("连续粘贴", action: model.showStack)
             Divider()
             Button("截图识别") { model.performTool(.screenshotOCR) }
             Button("截图翻译") { model.performTool(.screenshotTranslate) }
@@ -293,10 +302,12 @@ struct PastePanelView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 10) {
+        let filtering = !model.queryString.isEmpty || model.filter != ClipFilter()
+        let inPinboard = model.selectedPinboardID != nil
+        return VStack(spacing: 10) {
             Image(systemName: model.queryString.isEmpty ? "clipboard" : "magnifyingglass").font(.system(size: 35, weight: .light)).foregroundStyle(.secondary)
-            Text(model.queryString.isEmpty && model.filter == ClipFilter() ? "暂无剪贴板记录" : "未找到匹配项目").font(.headline)
-            Text("复制文本、图片、链接或文件后，将自动保存到此处。") .font(.subheadline).foregroundStyle(.secondary)
+            Text(filtering ? "未找到匹配卡片" : (inPinboard ? "收藏夹为空" : "暂无剪贴板记录")).font(.headline)
+            Text(filtering ? "更换关键词或清除筛选。" : (inPinboard ? "将卡片拖入此收藏夹。" : "复制的内容会显示在这里。")) .font(.subheadline).foregroundStyle(.secondary)
         }
     }
 }

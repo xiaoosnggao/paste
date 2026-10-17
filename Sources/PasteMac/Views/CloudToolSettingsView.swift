@@ -10,42 +10,70 @@ struct CloudToolSettingsView: View {
     var body: some View {
         Group {
             Section("文字识别") {
-                Picker("服务", selection: $model.toolConfiguration.ocrProvider) {
-                    ForEach(OCRProvider.allCases) { Text($0.title).tag($0) }
+                Picker("服务", selection: ocrSelection) {
+                    Section("常规识别") {
+                        ForEach(OCRProvider.allCases) { Text($0.title).tag(ToolSelectionItem.builtin($0.rawValue)) }
+                    }
+                    let aiList = model.toolConfiguration.aiServices.filter { !$0.ocrModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && $0.isEnabled }
+                    if !aiList.isEmpty {
+                        Section("AI 视觉服务") {
+                            ForEach(aiList) { service in
+                                Text("\(service.name) (\(service.ocrModel))").tag(ToolSelectionItem.aiService(service.id))
+                            }
+                        }
+                    }
                 }
-                ocrOptions
-                credentialFields(model.toolConfiguration.ocrProvider.credentialKinds, scope: .ocr)
-                Text(model.toolConfiguration.ocrProvider == .system
-                     ? "使用 macOS 文字识别，无需密钥，图片在本机处理。"
-                     : "识别时将图片发送至所选服务，费用由服务商收取。")
-                    .font(.caption).foregroundStyle(.secondary)
+                if model.toolConfiguration.ocrAIServiceID == nil {
+                    ocrOptions
+                    credentialFields(model.toolConfiguration.ocrProvider.credentialKinds, scope: .ocr)
+                    Text(model.toolConfiguration.ocrProvider == .system
+                         ? "使用 macOS 文字识别，无需密钥，图片在本机处理。"
+                         : "识别时将图片发送至所选服务，费用由服务商收取。")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Text("使用在「AI 服务」中配置的视觉模型。可在「AI 服务」设置页调整模型与密钥。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
             Section("文本翻译") {
-                Picker("服务", selection: $model.toolConfiguration.translationProvider) {
-                    ForEach(TranslationProvider.allCases) { Text($0.title).tag($0) }
+                Picker("服务", selection: translationSelection) {
+                    Section("常规翻译") {
+                        ForEach(TranslationProvider.allCases) { Text($0.title).tag(ToolSelectionItem.builtin($0.rawValue)) }
+                    }
+                    let aiList = model.toolConfiguration.aiServices.filter { !$0.translationModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && $0.isEnabled }
+                    if !aiList.isEmpty {
+                        Section("AI 服务") {
+                            ForEach(aiList) { service in
+                                Text("\(service.name) (\(service.translationModel))").tag(ToolSelectionItem.aiService(service.id))
+                            }
+                        }
+                    }
                 }
-                translationOptions
                 Picker("默认目标语言", selection: $model.toolConfiguration.targetLanguage) {
                     Text("简体中文").tag("zh"); Text("英语").tag("en"); Text("日语").tag("ja")
                     Text("韩语").tag("ko"); Text("繁体中文").tag("zh-Hant"); Text("法语").tag("fr")
                 }
-                credentialFields(model.toolConfiguration.translationProvider.credentialKinds, scope: .translation)
-                Text(model.toolConfiguration.translationProvider == .system
-                     ? "使用 macOS 翻译，首次使用可能需要下载语言资源。"
-                     : "翻译时将原文发送至所选服务，费用由服务商收取。")
-                    .font(.caption).foregroundStyle(.secondary)
+                if model.toolConfiguration.translationAIServiceID == nil {
+                    translationOptions
+                    credentialFields(model.toolConfiguration.translationProvider.credentialKinds, scope: .translation)
+                    Text(model.toolConfiguration.translationProvider == .system
+                         ? "使用 macOS 翻译，首次使用可能需要下载语言资源。"
+                         : "翻译时将原文发送至所选服务，费用由服务商收取。")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Text("使用在「AI 服务」中配置的翻译模型。可在「AI 服务」设置页调整模型与密钥。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
             Section("结果与隐私") {
-                Text("原图、识别文字、原文和译文分别保存为卡片。密钥保存在 Pasteboard 的钥匙串中，不包含在历史记录、备份或日志中。")
+                Text("密钥存于系统钥匙串，不随历史记录或备份导出。")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            Section("截图与快捷操作") {
-                Text("截图需要屏幕录制权限，选中文字翻译需要辅助功能权限。首次使用时将显示授权指引。各项快捷键可在“快捷键”中设置。")
-                    .font(.caption).foregroundStyle(.secondary)
-                Button("屏幕录制权限…") { ScreenshotCoordinator.openPermissionSettings() }
+            Section("快捷操作") {
                 Button("输入翻译") { model.performTool(.inputTranslate) }
             }
         }
+        .textFieldStyle(PasteboardTextFieldStyle())
         .onAppear(perform: loadSelectedCredentials)
         .onChange(of: model.toolConfiguration.ocrProvider) { _, _ in
             ocrMessage = nil; loadSelectedCredentials()
@@ -53,6 +81,58 @@ struct CloudToolSettingsView: View {
         .onChange(of: model.toolConfiguration.translationProvider) { _, _ in
             translationMessage = nil; loadSelectedCredentials()
         }
+        .onChange(of: model.toolConfiguration.ocrAIServiceID) { _, _ in
+            ocrMessage = nil; loadSelectedCredentials()
+        }
+        .onChange(of: model.toolConfiguration.translationAIServiceID) { _, _ in
+            translationMessage = nil; loadSelectedCredentials()
+        }
+    }
+
+    private var ocrSelection: Binding<ToolSelectionItem> {
+        Binding(
+            get: {
+                if let aiID = model.toolConfiguration.ocrAIServiceID {
+                    return .aiService(aiID)
+                }
+                return .builtin(model.toolConfiguration.ocrProvider.rawValue)
+            },
+            set: { newValue in
+                var configuration = model.toolConfiguration
+                switch newValue {
+                case .builtin(let raw):
+                    guard let provider = OCRProvider(rawValue: raw) else { return }
+                    configuration.ocrAIServiceID = nil
+                    configuration.ocrProvider = provider
+                case .aiService(let id):
+                    configuration.ocrAIServiceID = id
+                }
+                model.toolConfiguration = configuration
+            }
+        )
+    }
+
+    private var translationSelection: Binding<ToolSelectionItem> {
+        Binding(
+            get: {
+                if let aiID = model.toolConfiguration.translationAIServiceID {
+                    return .aiService(aiID)
+                }
+                return .builtin(model.toolConfiguration.translationProvider.rawValue)
+            },
+            set: { newValue in
+                var configuration = model.toolConfiguration
+                switch newValue {
+                case .builtin(let raw):
+                    guard let provider = TranslationProvider(rawValue: raw) else { return }
+                    configuration.translationAIServiceID = nil
+                    configuration.translationProvider = provider
+                case .aiService(let id):
+                    configuration.translationAIServiceID = id
+                }
+                model.toolConfiguration = configuration
+            }
+        )
     }
 
     @ViewBuilder private var ocrOptions: some View {
@@ -81,7 +161,7 @@ struct CloudToolSettingsView: View {
         case .openAICompatible:
             TextField("完整接口地址", text: $model.toolConfiguration.openAIOCREndpoint)
             TextField("视觉模型", text: $model.toolConfiguration.openAIOCRModel)
-            help("填写兼容 Chat Completions 的完整 HTTPS 接口地址，模型需支持图片输入。文字识别与翻译的配置分别保存。")
+            help("填写兼容 Chat Completions 的完整 HTTPS 接口地址，模型需支持图片输入。")
         }
     }
 

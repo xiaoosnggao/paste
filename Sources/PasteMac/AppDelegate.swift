@@ -3,6 +3,8 @@ import SwiftUI
 import PasteCore
 import Carbon
 import QuartzCore
+import OSLog
+import Combine
 
 final class ClipboardPanel: NSPanel {
     override var canBecomeKey: Bool { true }
@@ -11,7 +13,9 @@ final class ClipboardPanel: NSPanel {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDelegate {
+    private let captureLogger = Logger(subsystem: "com.gaoxs.pasteboard", category: "screenshot")
+    private var menuObservations = Set<AnyCancellable>()
     private var model: AppModel!
     private var panel: ClipboardPanel!
     private var panelSurface: NSView!
@@ -90,7 +94,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let modifiers = defaults.object(forKey: "shortcutModifiers") != nil ? UInt32(exactly: defaults.integer(forKey: "shortcutModifiers")) ?? UInt32(cmdKey | shiftKey) : UInt32(cmdKey | shiftKey)
         if shortcut.register(keyCode: key, modifiers: modifiers) {
             model.restoreShortcutDescription(defaults.string(forKey: "shortcutDescription") ?? "⇧⌘V")
-        } else { model.statusMessage = "打开剪贴板的快捷键已被占用。请从菜单栏打开设置并更换快捷键。" }
+        } else {
+            model.restoreShortcutDescription((defaults.string(forKey: "shortcutDescription") ?? "⇧⌘V") + "（占用）")
+            model.statusMessage = "打开剪贴板的快捷键已被占用。请从菜单栏打开设置并更换快捷键。"
+        }
         stackShortcut = GlobalShortcut(identifier: 2)
         stackShortcut.onActivate = { [weak self] in
             guard let self, self.selectionTask == nil, self.screenshotTask == nil, !self.screenshotCoordinator.isCapturing else { return }; self.model.showStack()
@@ -126,7 +133,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func showPanel(rememberTarget: Bool = true) {
-        guard !model.isPasting else { return }
+        guard !model.isPasting, screenshotTask == nil, !screenshotCoordinator.isCapturing else { return }
         if rememberTarget { model.pasteEngine.rememberTarget() }
         model.refreshDirectPastePermission()
         let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
@@ -176,6 +183,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             panel.animator().alphaValue = 0.85
         } completionHandler: { finish() }
     }
+    private func hidePanelForCapture() {
+        // Capture must not wait on an animation that a reopen can supersede.
+        panelPresented = false
+        presentationGeneration += 1
+        panel.orderOut(nil)
+        panelSurface.layer?.removeAllAnimations()
+        panelSurface.frame = NSRect(origin: .zero, size: panel.frame.size)
+        panel.alphaValue = 1
+        finishPasteHide()
+    }
+
     private func hidePanelForPaste() async {
         guard panel.isVisible else { return }
         await withCheckedContinuation { continuation in
@@ -201,7 +219,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         value.titleVisibility = .hidden
         value.styleMask.insert(.fullSizeContentView)
         value.isReleasedWhenClosed = false
-        value.contentView = NSHostingView(rootView: view)
+        value.isOpaque = false; value.backgroundColor = .clear
+        value.contentView = PanelGlassContainer.make(content: view, frame: NSRect(origin: .zero, size: size), cornerRadius: 14)
         value.center()
         value.delegate = self
         return value
@@ -236,6 +255,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem.button?.image = NSImage(systemSymbolName: "clipboard", accessibilityDescription: "Pasteboard")
         let menu = NSMenu()
+        menu.delegate = self
         menu.addItem(item("打开剪贴板", selector: #selector(openPanel)))
         menu.addItem(item("新建文本", selector: #selector(newText)))
         menu.addItem(item("连续粘贴", selector: #selector(openStack)))
@@ -254,6 +274,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         statusItem.menu = menu
         let main = NSMenu()
         let appMenu = NSMenu()
+        appMenu.delegate = self
         appMenu.addItem(item("关于 Pasteboard", selector: #selector(about)))
         appMenu.addItem(item("打开剪贴板", selector: #selector(openPanel)))
         appMenu.addItem(item("设置…", selector: #selector(openSettings), key: ","))
@@ -278,7 +299,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         let editing = NSMenuItem(); editing.title = "编辑"; editing.submenu = edit; main.addItem(editing)
         NSApp.mainMenu = main
+        model.$hotKeyDescription.sink { [weak self] in self?.refreshShortcutMenus(clipboard: $0) }.store(in: &menuObservations)
+        model.$stackHotKeyDescription.sink { [weak self] in self?.refreshShortcutMenus(stack: $0) }.store(in: &menuObservations)
+        model.toolShortcuts?.$bindings.sink { [weak self] in self?.refreshShortcutMenus(bindings: $0) }.store(in: &menuObservations)
     }
+    private func refreshShortcutMenus(clipboard: String? = nil, stack: String? = nil, bindings: [ToolAction: ToolShortcut]? = nil) {
+        for menu in [statusItem.menu, NSApp.mainMenu?.items.first?.submenu].compactMap({ $0 }) {
+            updateShortcutMenu(menu, clipboard: clipboard ?? model.hotKeyDescription, stack: stack ?? model.stackHotKeyDescription,
+                               bindings: bindings ?? model.toolShortcuts?.bindings ?? [:])
+        }
+    }
+    func menuWillOpen(_ menu: NSMenu) {
+        updateShortcutMenu(menu, clipboard: model.hotKeyDescription, stack: model.stackHotKeyDescription,
+                           bindings: model.toolShortcuts?.bindings ?? [:])
+    }
+    private func updateShortcutMenu(_ menu: NSMenu, clipboard: String, stack: String, bindings: [ToolAction: ToolShortcut]) {
+        let tools: [(Selector, ToolAction)] = [
+            (#selector(openScreenshotOCR), .screenshotOCR), (#selector(openScreenshotTranslation), .screenshotTranslate),
+            (#selector(openInputTranslation), .inputTranslate), (#selector(openClipboardTranslation), .clipboardTranslate),
+            (#selector(openSelectionTranslation), .selectionTranslate)
+        ]
+        for entry in menu.items {
+            if entry.action == #selector(openPanel) {
+                MenuShortcut.apply(clipboard, to: entry)
+            } else if entry.action == #selector(openStack) {
+                MenuShortcut.apply(stack, to: entry)
+            } else if let tool = tools.first(where: { entry.action == $0.0 }) {
+                let binding = bindings[tool.1]
+                MenuShortcut.apply(binding?.description, enabled: binding?.enabled == true, to: entry)
+            }
+        }
+    }
+
     private func item(_ title: String, selector: Selector, key: String = "") -> NSMenuItem {
         let value = NSMenuItem(title: title, action: selector, keyEquivalent: key)
         value.target = self
@@ -291,11 +343,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             return self.handle(event) ? nil : event
         }
         outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
-            Task { @MainActor in self?.hidePanel(); self?.closeUnpinnedTools() }
+            Task { @MainActor in
+                self?.hidePanel()
+                // System translation can show language/download dialogs in another process.
+                if self?.model.toolBusy == false { self?.closeUnpinnedTools() }
+            }
         }
         toolClickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
             guard let self else { return event }
-            if event.window != self.toolWindow { self.closeUnpinnedTools() }
+            // Popup menus and settings use other windows in this process. They are
+            // part of the tool interaction, not an outside click that cancels work.
+            if event.window === self.panel { self.closeUnpinnedTools() }
             return event
         }
         toolKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
@@ -406,7 +464,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         toolWindowPosition.save(toolWindow.frame.origin)
     }
     func windowWillClose(_ notification: Notification) {
-        if notification.object as? NSWindow === toolWindow { model.cancelToolOperation() }
+        if notification.object as? NSWindow === toolWindow { model.toolSessionActive = false; model.cancelToolOperation() }
     }
     private func matchesLegacyShortcut(_ key: UInt32, _ flags: UInt32, stack: Bool) -> Bool {
         let defaults = UserDefaults.standard
@@ -418,6 +476,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
     private func showTools() {
         guard !screenshotCoordinator.isCapturing else { return }
+        model.toolSessionActive = true
         hidePanel()
         if toolWindow == nil {
             let frame = NSRect(x: 0, y: 0, width: 640, height: 480)
@@ -428,7 +487,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             value.isOpaque = false; value.backgroundColor = .clear
             value.minSize = NSSize(width: 560, height: 480)
             value.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .canJoinAllApplications]
-            value.contentView = PanelGlassContainer.make(content: QuickToolView(model: model), frame: frame)
+            value.contentView = PanelGlassContainer.make(content: QuickToolView(model: model), frame: frame, cornerRadius: 14)
             value.delegate = self; toolWindow = value
         }
         guard let toolWindow else { return }
@@ -448,26 +507,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
     private func captureScreenshot(translate: Bool) {
         guard selectionTask == nil, screenshotTask == nil, !screenshotCoordinator.isCapturing, !model.isPasting else { return }
+        model.toolSessionActive = false
         model.cancelToolOperation(); model.toolItemID = nil; model.toolInputText = ""; model.toolError = nil; model.toolStatus = nil
         toolWindow?.orderOut(nil); previewWindow?.orderOut(nil); settingsWindow?.orderOut(nil)
         screenshotTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            await self.hidePanelForPaste()
+            defer { self.screenshotTask = nil }
+            self.captureLogger.notice("capture requested")
+            self.hidePanelForCapture()
             do {
                 try Task.checkCancellation()
                 let data = try await self.screenshotCoordinator.captureRegion()
+                self.captureLogger.notice("region captured")
                 try Task.checkCancellation()
                 if self.model.addScreenshot(data, translateAfter: translate) == nil { self.showTools() }
             } catch is CancellationError { }
             catch ScreenshotCoordinator.Failure.cancelled {
+                self.captureLogger.notice("capture cancelled")
                 self.model.toolError = nil; self.model.toolStatus = "截图已取消。"; self.showTools()
             }
             catch {
+                self.captureLogger.error("capture failed: \(String(describing: type(of: error)), privacy: .public)")
                 if PermissionGuideKind.forError(error) == .screenCapture || !ScreenshotCoordinator.isPermissionGranted {
                     self.showToolPermissionGuide(.screenCapture) { [weak self] in self?.captureScreenshot(translate: translate) }
                 } else { self.model.toolError = error.localizedDescription; self.showTools() }
             }
-            self.screenshotTask = nil
         }
     }
     private func captureSelectedText() {
@@ -513,6 +577,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
     private func showToolPermissionGuide(_ kind: PermissionGuideKind, onAuthorized: @escaping () -> Void) {
+        model.toolSessionActive = false
         hidePanel(); toolWindow?.orderOut(nil); previewWindow?.orderOut(nil)
         if accessibilityGuide == nil { accessibilityGuide = AccessibilityGuide(model: model) }
         accessibilityGuide?.show(kind: kind, onAuthorized: onAuthorized)
@@ -524,3 +589,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc private func openClipboardTranslation() { model.performTool(.clipboardTranslate) }
     func windowWillReturnUndoManager(_ window: NSWindow) -> UndoManager? { model.undoManager }
 }
+
+#if DEBUG
+extension AppDelegate {
+    /// Exercises interruption cleanup with hidden test windows; no screen access or clipboard writes.
+    @MainActor
+    static func checkCapturePanelHandoff() async throws -> Int {
+        let owner = AppDelegate()
+        owner.panel = ClipboardPanel(contentRect: NSRect(x: 0, y: 0, width: 300, height: 100),
+                                     styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        owner.panel.isReleasedWhenClosed = false
+        defer { owner.panel.close() }
+        owner.panelSurface = NSView(frame: NSRect(x: 0, y: -104, width: 300, height: 100))
+        owner.panel.alphaValue = 0.85
+        owner.panelPresented = true
+        owner.presentationGeneration = 2 // A reopen invalidated the original hide callback.
+        var resumed = 0
+        let first = Task { @MainActor in
+            await withCheckedContinuation { owner.pasteHideWaiters.append($0) }
+            resumed += 1
+        }
+        let second = Task { @MainActor in
+            await withCheckedContinuation { owner.pasteHideWaiters.append($0) }
+            resumed += 1
+        }
+        for _ in 0..<1000 where owner.pasteHideWaiters.count < 2 { await Task.yield() }
+        guard owner.pasteHideWaiters.count == 2 else { throw SystemChecks.Failure(message: "Capture handoff fixture did not register waiters") }
+        owner.hidePanelForCapture()
+        guard owner.pasteHideWaiters.isEmpty else { throw SystemChecks.Failure(message: "Capture handoff left interrupted hide waiters suspended") }
+        guard !owner.panelPresented, !owner.panel.isVisible, owner.presentationGeneration == 3,
+              owner.panel.alphaValue == 1, owner.panelSurface.frame.origin == .zero else {
+            throw SystemChecks.Failure(message: "Capture handoff retained stale panel presentation")
+        }
+        await first.value; await second.value
+        owner.hidePanelForCapture()
+        guard resumed == 2, owner.pasteHideWaiters.isEmpty else {
+            throw SystemChecks.Failure(message: "Capture handoff resumed a waiter more than once")
+        }
+        return 4
+    }
+}
+#endif

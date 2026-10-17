@@ -34,7 +34,7 @@ struct ToolShortcutsSettingsView: View {
                         .buttonStyle(.borderless).disabled(binding.keyCode == nil).help("清除快捷键")
                 }
             }
-            Text("在其他应用中选中文字后，按快捷键翻译。首次使用需授权辅助功能。")
+            Text("在其他应用中选中文字后，按快捷键翻译。")
                 .font(.caption).foregroundStyle(.secondary)
             if let message = shortcuts.errorMessage { Text(message).foregroundStyle(.red).font(.caption) }
         }

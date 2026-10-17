@@ -30,7 +30,15 @@ final class AppModel: ObservableObject {
     @Published private(set) var isPasting = false
     @Published private(set) var storageError: String?
     @Published var toolConfiguration = CloudToolConfiguration() {
-        didSet { if let data = try? JSONEncoder().encode(toolConfiguration) { toolDefaults.set(data, forKey: "cloudToolConfiguration.v1") } }
+        didSet {
+            if let data = try? JSONEncoder().encode(toolConfiguration) { toolDefaults.set(data, forKey: "cloudToolConfiguration.v1") }
+            let ocrChanged = !toolConfiguration.hasSameOCRSettings(as: oldValue)
+            let translationChanged = !toolConfiguration.hasSameTranslationSettings(as: oldValue)
+            if ocrChanged || translationChanged {
+                cancelAutoTranslation()
+                refreshToolAfterConfigurationChange(recognizeImage: ocrChanged)
+            }
+        }
     }
     @Published var toolInputText = ""
     @Published var toolItemID: UUID?
@@ -39,6 +47,12 @@ final class AppModel: ObservableObject {
     @Published var toolError: String?
     @Published var toolPinned = false
     @Published var toolShortcuts: ToolShortcutManager?
+    var autoTranslationTask: Task<Void, Never>?
+    var toolInputIsComposing = false
+    var toolSessionActive = false
+    var autoTranslationGeneration = UUID()
+    var completedToolTranslation: (text: String, configuration: CloudToolConfiguration, itemID: UUID)?
+    let autoTranslationDelayNanoseconds: UInt64
     var toolTask: Task<Void, Never>?
     var toolGeneration = UUID()
     var lastToolOperation: ToolAction = .inputTranslate
@@ -50,7 +64,7 @@ final class AppModel: ObservableObject {
     var onToolStart: (() -> Void)?
     let isDemo: Bool
     let undoManager = UndoManager()
-    let pasteEngine = PasteEngine()
+    let pasteEngine: PasteEngine
     let bridge: ClipboardBridge
     let repository: SnapshotRepository
     let storageDirectory: URL
@@ -72,7 +86,9 @@ final class AppModel: ObservableObject {
     var onShortcut: ((UInt32, UInt32) -> Bool)?
     var onStackShortcut: ((UInt32, UInt32) -> Bool)?
 
-    init(isDemo: Bool = false, storageDirectory: URL? = nil, bridge: ClipboardBridge? = nil, toolOperations: ToolOperations? = nil, toolDefaults: UserDefaults = .standard) {
+    init(isDemo: Bool = false, storageDirectory: URL? = nil, bridge: ClipboardBridge? = nil, toolOperations: ToolOperations? = nil, toolDefaults: UserDefaults = .standard, pasteEngine: PasteEngine? = nil, autoTranslationDelayNanoseconds: UInt64 = 750_000_000) {
+        self.autoTranslationDelayNanoseconds = autoTranslationDelayNanoseconds
+        self.pasteEngine = pasteEngine ?? PasteEngine()
         self.isDemo = isDemo
         self.toolOperations = toolOperations ?? .live()
         self.toolDefaults = toolDefaults
@@ -112,15 +128,19 @@ final class AppModel: ObservableObject {
     var activePinboard: Pinboard? { snapshot.pinboards.first { $0.id == selectedPinboardID } }
     var isPaused: Bool { pendingPauseIndefinite || (pauseUntil.map { $0 > Date() } ?? false) || !snapshot.preferences.monitoringEnabled }
     var launchAtLogin: Bool { SMAppService.mainApp.status == .enabled }
-    var pasteFailureText: String? { pasteIssue?.message }
+    var pasteFailureText: String? {
+        pasteIssue == .accessibilityPermissionRequired ? nil : pasteIssue?.message
+    }
     func refreshDirectPastePermission() {
         guard pasteEngine.accessibilityChecksEnabled else { return }
         hasCheckedDirectPastePermission = true
         directPastePermissionGranted = pasteEngine.accessibilityGranted
     }
     func requestDirectPastePermission() {
-        pasteEngine.enableAccessibilityChecks()
-        refreshDirectPastePermission()
+        if !isDemo {
+            pasteEngine.enableAccessibilityChecks()
+            refreshDirectPastePermission()
+        }
         onAccessibilityGuide?()
     }
 
@@ -202,16 +222,26 @@ final class AppModel: ObservableObject {
         }
         isPasting = true
         Task { @MainActor in
+            var panelClosed = false
             let dispatched = await pasteEngine.dispatchPaste(closePanel: { [weak self] in
                 if let prepare = self?.onPreparePaste { await prepare() }
                 else { self?.onClose?() }
+                panelClosed = true
             })
             isPasting = false
-            if !dispatched {
+            if !dispatched, pasteEngine.lastIssue?.usesCopyOnlyFallback == true {
+                // The clip is already written. Missing destinations are normal copy-only use.
+                statusMessage = "已复制"
+                if !panelClosed { onClose?() }
+            } else if !dispatched {
                 pasteIssue = pasteEngine.lastIssue
-                statusMessage = pasteIssue?.message
-                if pasteIssue == .accessibilityPermissionRequired, onAccessibilityGuide != nil { requestDirectPastePermission() }
-                else { onPasteFailure?() }
+                if pasteIssue == .accessibilityPermissionRequired, onAccessibilityGuide != nil {
+                    statusMessage = nil
+                    requestDirectPastePermission()
+                } else {
+                    statusMessage = pasteIssue?.message
+                    onPasteFailure?()
+                }
             }
             else { statusMessage = nil }
             completion?(dispatched)

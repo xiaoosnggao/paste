@@ -1,7 +1,9 @@
 #if DEBUG
 import Foundation
+import AppKit
+import PasteCore
 
-/// Exercises only a fake environment: no pasteboard writes, accessibility calls or keyboard events.
+/// Uses simulated dispatch and an isolated pasteboard; never writes the general clipboard or sends native events.
 @MainActor
 enum PasteDispatchChecks {
     @MainActor
@@ -175,6 +177,63 @@ enum PasteDispatchChecks {
         let missingResult = await missingEngine.dispatchPaste { missing.trace.append("close") }
         try check(!missingResult && missingEngine.lastIssue == .noTarget, "missing target reason")
         try check(missing.trace.isEmpty && missing.sendCount == 0, "missing target caused side effects")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("paste-copy-fallback-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let board = NSPasteboard.withUniqueName()
+        defer { board.releaseGlobally() }
+        let copyModel = AppModel(isDemo: true, storageDirectory: directory,
+                                 bridge: ClipboardBridge(pasteboard: board), pasteEngine: missingEngine)
+        copyModel.snapshot.preferences.pasteToFrontmost = true
+        var closed = 0, reopened = 0
+        copyModel.onClose = { closed += 1 }
+        copyModel.onPasteFailure = { reopened += 1 }
+        copyModel.activateSelected()
+        for _ in 0..<1000 where copyModel.isPasting { await Task.yield() }
+        try check(!copyModel.isPasting && copyModel.pasteIssue == nil && copyModel.statusMessage == "已复制",
+                  "missing target must finish as copy-only without warning")
+        try check(closed == 1 && reopened == 0 && missing.sendCount == 0 && board.pasteboardItems?.isEmpty == false,
+                  "copy-only must retain copied data, close once and never reopen or dispatch")
+        let deniedCopy = Environment(); deniedCopy.accessibilityGranted = false
+        let deniedModel = AppModel(isDemo: true, storageDirectory: directory.appendingPathComponent("denied"),
+                                   bridge: ClipboardBridge(pasteboard: board), pasteEngine: engine(deniedCopy))
+        deniedModel.snapshot.preferences.pasteToFrontmost = true
+        var guides = 0, permissionReopened = 0
+        deniedModel.onAccessibilityGuide = { guides += 1 }
+        deniedModel.onPasteFailure = { permissionReopened += 1 }
+        deniedModel.activateSelected()
+        for _ in 0..<1000 where deniedModel.isPasting { await Task.yield() }
+        try check(guides == 1 && permissionReopened == 0 && deniedCopy.sendCount == 0,
+                  "missing permission must open guide once without dispatch or failure panel")
+        try check(deniedModel.pasteIssue == .accessibilityPermissionRequired && deniedModel.pasteFailureText == nil && deniedModel.statusMessage == nil,
+                  "permission guide must not leave redundant footer messages")
+        deniedModel.pasteIssue = .eventUnavailable
+        try check(deniedModel.pasteFailureText == PasteIssue.eventUnavailable.message,
+                  "removing permission prompts hid an actual dispatch error")
+        let disabledCopy = Environment()
+        disabledCopy.sendSucceeds = false; disabledCopy.lastSendIssue = .noEditableTarget
+        let disabledModel = AppModel(isDemo: true, storageDirectory: directory.appendingPathComponent("disabled"),
+                                     bridge: ClipboardBridge(pasteboard: board), pasteEngine: engine(disabledCopy))
+        disabledModel.snapshot.preferences.pasteToFrontmost = true
+        var prepared = 0, extraClosed = 0, disabledReopened = 0
+        disabledModel.onPreparePaste = { prepared += 1 }
+        disabledModel.onClose = { extraClosed += 1 }
+        disabledModel.onPasteFailure = { disabledReopened += 1 }
+        disabledModel.setStack(Array(disabledModel.visibleItems.prefix(2)))
+        let originalStack = disabledModel.stackItems
+        disabledModel.pasteNextStack()
+        for _ in 0..<1000 where disabledModel.isPasting { await Task.yield() }
+        try check(!disabledModel.isPasting && disabledModel.pasteIssue == nil && disabledModel.statusMessage == "已复制",
+                  "disabled destination must finish as copy-only without warning")
+        try check(prepared == 1 && extraClosed == 0 && disabledReopened == 0,
+                  "disabled destination reopened or closed the panel twice")
+        try check(disabledModel.stackItems == originalStack, "copy-only fallback consumed an unpasted stack item")
+        for issue in [PasteIssue.noTarget, .noEditableTarget] {
+            try check(issue.usesCopyOnlyFallback, "missing destination must use copy-only fallback")
+        }
+        for issue in [PasteIssue.accessibilityPermissionRequired, .eventUnavailable, .focusNotRestored,
+                      .focusQueryUnavailable, .capturedFocusQueryUnavailable, .pasteActionUncertain, .targetUnavailable] {
+            try check(!issue.usesCopyOnlyFallback, "real paste error incorrectly treated as copy-only")
+        }
         return count
     }
 }

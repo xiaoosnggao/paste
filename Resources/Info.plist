@@ -7,11 +7,12 @@
 <key>CFBundleExecutable</key><string>Pasteboard</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleIconFile</key><string>Pasteboard.icns</string>
-<key>CFBundleShortVersionString</key><string>0.4.3</string>
-<key>CFBundleVersion</key><string>12</string>
+<key>CFBundleShortVersionString</key><string>0.4.5</string>
+<key>CFBundleVersion</key><string>33</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>LSUIElement</key><true/>
 <key>NSHighResolutionCapable</key><true/>
+<key>NSScreenCaptureUsageDescription</key><string>用于截取所选区域，识别图片文字或翻译截图。</string>
 <key>NSPrincipalClass</key><string>NSApplication</string>
 <key>NSHumanReadableCopyright</key><string>Independent implementation, 2026</string>
 <key>CFBundleURLTypes</key><array><dict><key>CFBundleURLSchemes</key><array><string>pasteboard</string></array></dict></array>

@@ -10,16 +10,17 @@ struct QuickToolView: View {
     @State private var copied: String?
     @FocusState private var sourceFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     private var item: ClipItem? { model.activeToolItem }
     private var translation: ClipTranslation? { item?.enrichment?.translation }
     private var dirty: Bool { item != nil && model.toolInputText != model.toolSourceText }
-    private var staleTranslation: Bool { translation.map { $0.sourceText != model.toolInputText } ?? false }
+    private var staleTranslation: Bool { model.toolTranslationIsStale }
     private var hasImage: Bool { item?.kind == .image }
 
     var body: some View {
         VStack(spacing: 0) {
             titlebar
-            Divider().opacity(0.5)
+            Divider().opacity(0.45)
             VStack(spacing: 12) {
                 services
                 if hasImage { imageStrip }
@@ -30,10 +31,11 @@ struct QuickToolView: View {
         }
         .frame(minWidth: 540, minHeight: 390)
         .ignoresSafeArea(.container, edges: .top)
-        .background(Color(nsColor: .windowBackgroundColor).opacity(0.88))
+        .background(Color(nsColor: .windowBackgroundColor).opacity(reduceTransparency ? 1 : 0))
         .background { if #available(macOS 15.0, *) { SystemTranslationHost() } }
         .task(id: item?.fingerprint) { await loadImage() }
-        .onAppear { if !hasImage { sourceFocused = true } }
+        .background(InputFocusOnAppear { if !hasImage { sourceFocused = true } }.frame(width: 0, height: 0))
+        .onDisappear { model.cancelAutoTranslation() }
     }
 
     private var titlebar: some View {
@@ -42,7 +44,7 @@ struct QuickToolView: View {
             ToolWindowDragRegion().frame(maxWidth: .infinity).frame(height: 38)
             if model.isDemo { Text("DEMO").font(.system(size: 9, weight: .medium)).foregroundStyle(.tertiary) }
             Image(systemName: "lock.shield").font(.system(size: 11)).foregroundStyle(.tertiary)
-                .help("系统服务在本机处理。云服务仅接收当前图片或文字。原始内容与结果分别保存为卡片。")
+                .help("系统服务在本机处理；云服务仅接收当前图片或文字。")
             ToolIconButton(symbol: "slider.horizontal.3", label: "服务设置") { model.onSettings?() }
             ToolIconButton(symbol: model.toolPinned ? "pin.fill" : "pin", label: "固定窗口 ⌘P", active: model.toolPinned) { model.toolPinned.toggle() }
         }.padding(.leading, 76).padding(.trailing, 10).frame(height: 38)
@@ -54,14 +56,24 @@ struct QuickToolView: View {
                 Button("截图识别") { model.performTool(.screenshotOCR) }
                 Button("截图翻译") { model.performTool(.screenshotTranslate) }
             } label: {
-                Label("截图", systemImage: "camera.viewfinder").font(.system(size: 12, weight: .medium))
-            } primaryAction: { model.performTool(.screenshotOCR) }
-                .fixedSize().controlSize(.small).help("框选屏幕区域以识别文字，也可在菜单中选择截图翻译")
+                Label("截图翻译", systemImage: "camera.viewfinder").font(.system(size: 12, weight: .medium))
+            } primaryAction: { model.performTool(.screenshotTranslate) }
+                .fixedSize().controlSize(.small).help("框选屏幕区域后自动识别并翻译")
             Divider().frame(height: 12)
             if hasImage {
                 Menu {
-                    Picker("识别服务", selection: $model.toolConfiguration.ocrProvider) {
-                        ForEach(OCRProvider.allCases) { Text($0.title).tag($0) }
+                    Picker("识别服务", selection: ocrSelection) {
+                        Section("常规识别") {
+                            ForEach(OCRProvider.allCases) { Text($0.title).tag(ToolSelectionItem.builtin($0.rawValue)) }
+                        }
+                        let aiList = model.toolConfiguration.aiServices.filter { !$0.ocrModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && $0.isEnabled }
+                        if !aiList.isEmpty {
+                            Section("AI 视觉服务") {
+                                ForEach(aiList) { service in
+                                    Text("\(service.name) (\(service.ocrModel))").tag(ToolSelectionItem.aiService(service.id))
+                                }
+                            }
+                        }
                     }
                 } label: {
                     Label(shortName(model.toolConfiguration.ocrProviderTitle), systemImage: "viewfinder")
@@ -70,8 +82,18 @@ struct QuickToolView: View {
                 Divider().frame(height: 12).padding(.horizontal, 2)
             }
             Menu {
-                Picker("翻译服务", selection: $model.toolConfiguration.translationProvider) {
-                    ForEach(TranslationProvider.allCases) { Text($0.title).tag($0) }
+                Picker("翻译服务", selection: translationSelection) {
+                    Section("常规翻译") {
+                        ForEach(TranslationProvider.allCases) { Text($0.title).tag(ToolSelectionItem.builtin($0.rawValue)) }
+                    }
+                    let aiList = model.toolConfiguration.aiServices.filter { !$0.translationModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && $0.isEnabled }
+                    if !aiList.isEmpty {
+                        Section("AI 服务") {
+                            ForEach(aiList) { service in
+                                Text("\(service.name) (\(service.translationModel))").tag(ToolSelectionItem.aiService(service.id))
+                            }
+                        }
+                    }
                 }
             } label: {
                 Label(shortName(model.toolConfiguration.translationProviderTitle), systemImage: "character.bubble")
@@ -98,18 +120,17 @@ struct QuickToolView: View {
                     .popover(isPresented: $expandedImage, arrowEdge: .top) {
                         thumbnail.frame(width: 360, height: 240).padding(12)
                     }
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("截图").font(.system(size: 12, weight: .medium))
-                    Text("原图与识别文字分别保存")
-                        .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
-                }
+                Text("截图").font(.system(size: 12, weight: .medium))
                 Spacer(minLength: 4)
-                Button("重新识别") { if let item { model.recognizeItem(item) } }
+                Button("重新识别并翻译") {
+                    if let item { model.recognizeItem(item) }
+                }
                     .controlSize(.small).disabled(model.toolBusy)
                 ToolIconButton(symbol: "doc.on.doc", label: "复制原图") { if let item { model.copyToolOriginal(item) } }
             }
         }.padding(10)
-            .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 10))
+            .background(Color(nsColor: .textBackgroundColor).opacity(reduceTransparency ? 1 : 0.3), in: RoundedRectangle(cornerRadius: 8))
+            .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(Color(nsColor: .separatorColor).opacity(0.6), lineWidth: 0.5) }
     }
 
     @ViewBuilder private var thumbnail: some View {
@@ -135,22 +156,22 @@ struct QuickToolView: View {
                 ZStack(alignment: .topLeading) {
                     if model.toolInputText.isEmpty {
                         Text(hasImage ? "等待识别文字…" : "输入或粘贴文字…")
-                            .font(.system(size: 14)).foregroundStyle(.tertiary).padding(.horizontal, 5).padding(.top, 7)
+                            .font(.system(size: 14)).foregroundStyle(.tertiary)
                             .allowsHitTesting(false)
                     }
-                    TextEditor(text: $model.toolInputText)
-                        .font(.system(size: 14)).lineSpacing(5).scrollContentBackground(.hidden)
-                        .focused($sourceFocused).disabled(model.toolBusy)
-                        .accessibilityLabel(hasImage ? "识别文字" : "原文")
+                    ToolSourceEditor(text: model.toolInputText, focused: $sourceFocused,
+                                     label: hasImage ? "识别文字" : "原文") { text, composing in
+                        model.editToolInput(text, isComposing: composing)
+                    }
                 }.frame(minHeight: 130, maxHeight: .infinity)
                 Text("\(model.toolInputText.count) 个字符").font(.system(size: 10).monospacedDigit()).foregroundStyle(.tertiary)
             }.padding(12).frame(width: (geometry.size.width - 1) / 2, height: geometry.size.height)
-            Rectangle().fill(.primary.opacity(0.07)).frame(width: 1)
+            Rectangle().fill(Color(nsColor: .separatorColor).opacity(0.6)).frame(width: 1)
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
-                    Text(staleTranslation ? "译文 · 原文已修改" : "译文").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                    Text(staleTranslation ? "译文 · 待更新" : "译文").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
                     if staleTranslation {
-                        Image(systemName: "arrow.clockwise").font(.system(size: 10)).foregroundStyle(.orange).help("原文已修改，需重新翻译")
+                        Image(systemName: "arrow.clockwise").font(.system(size: 10)).foregroundStyle(.orange).help("原文或翻译设置已更改")
                     }
                     Spacer()
                     ToolIconButton(symbol: copied == "translation" ? "checkmark" : "doc.on.doc", label: "复制译文") {
@@ -176,8 +197,8 @@ struct QuickToolView: View {
                     .font(.system(size: 10)).foregroundStyle(.tertiary).lineLimit(1)
             }.padding(12).frame(width: (geometry.size.width - 1) / 2, height: geometry.size.height)
         }
-        .background(Color(nsColor: .textBackgroundColor).opacity(0.72), in: RoundedRectangle(cornerRadius: 12))
-        .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(.primary.opacity(0.07), lineWidth: 1) }
+        .background(Color(nsColor: .textBackgroundColor).opacity(reduceTransparency ? 1 : 0.3), in: RoundedRectangle(cornerRadius: 10))
+        .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(Color(nsColor: .separatorColor).opacity(0.7), lineWidth: 0.5) }
         }
     }
 
@@ -196,9 +217,10 @@ struct QuickToolView: View {
     private var footer: some View {
         HStack(spacing: 8) {
             if model.toolBusy { ProgressView().controlSize(.mini) }
-            else { Image(systemName: "square.stack").font(.system(size: 11)).foregroundStyle(.tertiary) }
-            Text(dirty ? "原文已修改，翻译后自动保存" : (model.toolStatus ?? "原始内容与结果分别保存"))
-                .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1).help(model.toolStatus ?? "原始内容与结果分别保存为卡片")
+            if let message = dirty ? "原文已修改" : model.toolStatus {
+                Text(message).font(.system(size: 10)).foregroundStyle(.secondary)
+                    .lineLimit(1).help(message)
+            }
             Spacer(minLength: 8)
             if model.toolBusy {
                 Button("取消", action: model.cancelToolOperation).controlSize(.regular)
@@ -208,9 +230,56 @@ struct QuickToolView: View {
                         Text(translation == nil ? "翻译" : "重新翻译")
                         Text("↩").opacity(0.65)
                     }.font(.system(size: 12, weight: .medium)).padding(.horizontal, 5)
-                }.buttonStyle(.borderedProminent).controlSize(.large).disabled(model.toolInputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }.buttonStyle(.borderedProminent).controlSize(.large).disabled(!hasImage && model.toolInputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .help("停止输入0.75秒自动翻译；按回车立即翻译")
             }
         }.frame(minHeight: 32)
+    }
+
+    private var ocrSelection: Binding<ToolSelectionItem> {
+        Binding(
+            get: {
+                if let aiID = model.toolConfiguration.ocrAIServiceID {
+                    return .aiService(aiID)
+                }
+                return .builtin(model.toolConfiguration.ocrProvider.rawValue)
+            },
+            set: { newValue in
+                var configuration = model.toolConfiguration
+                switch newValue {
+                case .builtin(let raw):
+                    guard let provider = OCRProvider(rawValue: raw) else { return }
+                    configuration.ocrAIServiceID = nil
+                    configuration.ocrProvider = provider
+                case .aiService(let id):
+                    configuration.ocrAIServiceID = id
+                }
+                model.toolConfiguration = configuration
+            }
+        )
+    }
+
+    private var translationSelection: Binding<ToolSelectionItem> {
+        Binding(
+            get: {
+                if let aiID = model.toolConfiguration.translationAIServiceID {
+                    return .aiService(aiID)
+                }
+                return .builtin(model.toolConfiguration.translationProvider.rawValue)
+            },
+            set: { newValue in
+                var configuration = model.toolConfiguration
+                switch newValue {
+                case .builtin(let raw):
+                    guard let provider = TranslationProvider(rawValue: raw) else { return }
+                    configuration.translationAIServiceID = nil
+                    configuration.translationProvider = provider
+                case .aiService(let id):
+                    configuration.translationAIServiceID = id
+                }
+                model.toolConfiguration = configuration
+            }
+        )
     }
 
     private func shortName(_ name: String) -> String {
@@ -219,6 +288,7 @@ struct QuickToolView: View {
             .replacingOccurrences(of: "OpenAI 兼容", with: "OpenAI")
             .replacingOccurrences(of: "Google Cloud Vision", with: "Google Vision")
     }
+
     private func copy(_ text: String, pane: String) {
         model.copyToolText(text); copied = pane
         Task { @MainActor in

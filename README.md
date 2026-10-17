@@ -35,6 +35,8 @@ xattr -cr /Applications/Pasteboard.app
 
 ## 从源码构建
 
+构建需要 Xcode 26.4 或更新版本及完整 macOS SDK；CI 使用 Xcode 26.6。运行要求仍为 macOS 14 或更新版本。
+
 ```bash
 git clone https://github.com/xiaoosnggao/paste.git
 cd paste
@@ -72,3 +74,13 @@ Resources/         # Info.plist、图标、示例文件
 ## License
 
 [MIT](LICENSE) © xiaoosnggao
+
+### 保留更新后的隐私授权
+
+发布版本应持续使用同一代码签名证书：
+
+```bash
+PASTEBOARD_SIGNING_IDENTITY="Developer ID Application: 名称 (TEAMID)" scripts/build-app.sh release
+```
+
+本机构建也可在项目根目录 `.signing-identity` 中保存证书指纹（此文件不提交到 Git）；环境变量优先。两者都未设置时生成临时签名构建。临时签名的程序身份随内容变化，不能保证更新后保留辅助功能和屏幕录制授权。固定安装位置为 `/Applications/Pasteboard.app`，更新前先退出旧进程。应用不会在启动时请求或写入系统授权，也不自动删除隐私记录。

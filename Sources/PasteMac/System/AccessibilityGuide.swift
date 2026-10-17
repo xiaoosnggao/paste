@@ -44,37 +44,163 @@ private struct AccessibilityGuideView: View {
     let applicationURL: URL
     let openSettings: () -> Void
     let dismiss: () -> Void
+    @State private var confirmRepair = false
+    private var permissionTitle: String { state.kind == .screenCapture ? "屏幕录制" : "辅助功能" }
+
     var body: some View {
-        VStack(spacing: 14) {
-            Text(state.kind.title).font(.system(size: 18, weight: .semibold))
-            DraggableApplicationIcon(applicationURL: applicationURL, destination: state.kind.destination)
-                .frame(width: 88, height: 88)
-            Text("将图标拖入\(state.kind.destination)列表")
-                .font(.system(size: 13, weight: .medium)).multilineTextAlignment(.center)
-            Text(state.kind.instructions)
-                .font(.system(size: 12)).foregroundStyle(.secondary)
-                .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
-            Label(state.granted ? "权限已开启" : "请在系统设置中开启权限",
-                  systemImage: state.granted ? "checkmark.circle.fill" : "hand.point.up.left")
-                .font(.system(size: 12)).foregroundStyle(state.granted ? Color.green : Color.secondary)
-            Button(state.kind.settingsTitle, action: openSettings)
-            if state.kind == .screenCapture {
-                Text("如系统要求重新打开应用，请重新打开后重试截图。")
-                    .font(.system(size: 10)).foregroundStyle(.secondary).multilineTextAlignment(.center)
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("权限设置").font(.system(size: 22, weight: .semibold))
+                    Spacer()
+                    Text("Pasteboard").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+                }
+                HStack(spacing: 12) {
+                    step("辅助功能", number: 1)
+                    stepConnector(completed: state.stepNumber > 1)
+                    step("屏幕录制", number: 2)
+                    stepConnector(completed: state.stepNumber > 2)
+                    step("完成", number: 3)
+                }
             }
+            .padding(.bottom, 16)
+
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 0) {
+                    if state.isReview {
+                        VStack(spacing: 14) {
+                            Image(systemName: state.granted ? "checkmark.shield.fill" : "exclamationmark.shield.fill")
+                                .font(.system(size: 44, weight: .light))
+                                .foregroundStyle(state.granted ? Color.green : Color.orange)
+                            Text(state.granted ? "一切就绪" : "请重新检查权限")
+                                .font(.system(size: 19, weight: .semibold))
+                            Text(state.granted ? "现在可以直接粘贴、截图和选中文字翻译。" : "部分权限已变更，点击完成后重新设置。")
+                                .font(.system(size: 12)).foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                        }
+                        .frame(maxWidth: .infinity).padding(.vertical, 34)
+                        .frame(minHeight: 220)
+                    } else {
+                        permissionCard
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(spacing: 6) {
+                                Image(systemName: state.granted ? "checkmark.circle.fill" : "circle.dashed")
+                                    .foregroundStyle(state.granted ? Color.green : Color.secondary)
+                                Text(state.granted ? "已授权" : "尚未生效")
+                                    .foregroundStyle(.secondary)
+                                Spacer(minLength: 8)
+                                if !state.granted {
+                                    Button(state.repairing ? "正在修复…" : "已开启但不可用？") { confirmRepair = true }
+                                        .buttonStyle(.plain).foregroundStyle(Color.accentColor)
+                                        .disabled(state.repairing)
+                                        .help("仅重置 Pasteboard 的\(permissionTitle)授权，随后需要重新开启。")
+                                }
+                            }
+                            Text(statusHint)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .lineLimit(2)
+                        }
+                        .font(.system(size: 11))
+                        .padding(.top, 12)
+                        .frame(maxWidth: .infinity, minHeight: 48, alignment: .topLeading)
+                    }
+                }.frame(maxWidth: .infinity, alignment: .topLeading)
+            }.scrollIndicators(.hidden)
+
+            Divider().padding(.bottom, 12)
             HStack {
-                Button("在访达中显示") { NSWorkspace.shared.activateFileViewerSelecting([applicationURL]) }
+                Button("稍后", action: dismiss).buttonStyle(.plain).foregroundStyle(.secondary)
                 Spacer()
-                Button("稍后", action: dismiss)
-                Button(state.granted ? state.kind.continueTitle : "检查权限") {
-                    if state.granted { state.proceed() } else { state.refresh() }
-                }.keyboardShortcut(.defaultAction)
-            }.controlSize(.small)
+                Button(state.isReview ? "完成" : (state.granted ? "下一步" : "检查权限")) {
+                    if state.isReview || state.granted { state.proceed() } else { state.refresh() }
+                }
+                .keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent)
+                .controlSize(.large).disabled(state.repairing)
+            }
         }
-        .padding(.horizontal, 24).padding(.top, 40).padding(.bottom, 22)
-        .frame(width: 340)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .padding(.horizontal, 24).padding(.bottom, 20).padding(.top, 40)
+        .frame(width: 480, height: 440)
+        .alert("修复旧授权？", isPresented: $confirmRepair) {
+            Button("取消", role: .cancel) {}
+            Button("修复旧授权", role: .destructive) {
+                state.repair(using: { try await PermissionRepair.reset($0) }, onRepaired: openSettings)
+            }
+        } message: {
+            Text("仅重置 Pasteboard 的\(permissionTitle)授权，随后需要重新开启。")
+        }
     }
+
+    private var statusHint: String {
+        if let message = state.repairMessage { return message }
+        if state.granted { return "" }
+        if state.kind == .screenCapture { return "首次开启后，请退出并重新打开 Pasteboard。" }
+        return "开启后返回此窗口检查权限。"
+    }
+
+    private var permissionCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 16) {
+                DraggableApplicationIcon(applicationURL: applicationURL, destination: state.kind.destination)
+                    .frame(width: 64, height: 64).id(state.kind.destination)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(permissionTitle).font(.system(size: 18, weight: .semibold))
+                    Text(state.kind == .screenCapture ? "截图识别 · 截图翻译" : "直接粘贴 · 选中文字翻译")
+                        .font(.system(size: 12)).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+            }
+            Divider()
+            VStack(alignment: .leading, spacing: 8) {
+                if !state.granted {
+                    Label("在系统设置中添加并开启 Pasteboard。", systemImage: "hand.draw")
+                        .font(.system(size: 12)).foregroundStyle(.secondary)
+                }
+                Button {
+                    if state.kind == .screenCapture { ScreenshotCoordinator.openPermissionSettings(requestAccess: true) }
+                    else { openSettings() }
+                } label: {
+                    HStack {
+                        Text(state.kind.settingsTitle)
+                        Spacer()
+                        Image(systemName: "arrow.up.right").font(.system(size: 10, weight: .semibold))
+                    }
+                    .font(.system(size: 12, weight: .medium))
+                    .padding(.horizontal, 12).padding(.vertical, 10)
+                    .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+                    .contentShape(RoundedRectangle(cornerRadius: 8))
+                }
+                .buttonStyle(.plain).foregroundStyle(Color.accentColor)
+                .accessibilityLabel(state.kind.settingsTitle)
+            }
+        }
+        .padding(16)
+        .background(.background.opacity(0.52), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.primary.opacity(0.07), lineWidth: 0.5))
+    }
+
+    private func step(_ title: String, number: Int) -> some View {
+        HStack(spacing: 6) {
+            ZStack {
+                Circle().fill(number <= state.stepNumber ? Color.accentColor : Color.secondary.opacity(0.12))
+                if number < state.stepNumber {
+                    Image(systemName: "checkmark").font(.system(size: 9, weight: .bold)).foregroundStyle(.white)
+                } else {
+                    Text("\(number)").font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(number == state.stepNumber ? Color.white : Color.secondary)
+                }
+            }.frame(width: 20, height: 20)
+            Text(title).font(.system(size: 11, weight: number == state.stepNumber ? .semibold : .regular))
+                .foregroundStyle(number == state.stepNumber ? Color.primary : Color.secondary)
+                .fixedSize()
+        }
+    }
+
+    private func stepConnector(completed: Bool) -> some View {
+        Capsule().fill(completed ? Color.accentColor.opacity(0.4) : Color.secondary.opacity(0.15))
+            .frame(height: 1).frame(maxWidth: .infinity)
+    }
+
 }
 
 @MainActor
@@ -84,8 +210,8 @@ final class AccessibilityGuide: NSObject, NSWindowDelegate {
     private var permissionTimer: Timer?
     init(model: AppModel) {
         state = PermissionGuideState { [weak model] kind in
+            guard let model, !model.isDemo else { return false }
             if kind == .screenCapture { return ScreenshotCoordinator.isPermissionGranted }
-            guard let model else { return false }
             model.pasteEngine.enableAccessibilityChecks()
             model.refreshDirectPastePermission()
             return model.directPastePermissionGranted
@@ -94,27 +220,29 @@ final class AccessibilityGuide: NSObject, NSWindowDelegate {
     func show(kind: PermissionGuideKind = .directPaste, onAuthorized: (() -> Void)? = nil) {
         state.present(kind) { [weak self] in self?.panel?.close(); onAuthorized?() }
         if panel == nil {
-            let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 340, height: 410),
+            let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 480, height: 440),
                                 styleMask: [.titled, .closable, .nonactivatingPanel, .fullSizeContentView], backing: .buffered, defer: false)
             panel.titleVisibility = .hidden; panel.titlebarAppearsTransparent = true
             panel.isReleasedWhenClosed = false; panel.isMovableByWindowBackground = true
+            panel.isOpaque = false; panel.backgroundColor = .clear
             panel.hidesOnDeactivate = false; panel.level = .floating
             panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .canJoinAllApplications, .ignoresCycle]
             panel.delegate = self
-            panel.contentView = NSHostingView(rootView: AccessibilityGuideView(state: state, applicationURL: Bundle.main.bundleURL,
+            panel.contentView = PanelGlassContainer.make(content: AccessibilityGuideView(state: state, applicationURL: Bundle.main.bundleURL,
                 openSettings: { [weak self] in
                     guard let self else { return }
                     if self.state.kind == .screenCapture { ScreenshotCoordinator.openPermissionSettings() }
                     else { PasteEngine.openAccessibilitySettings() }
-                }, dismiss: { [weak self] in self?.panel?.close() }))
+                }, dismiss: { [weak self] in self?.panel?.close() }),
+                frame: NSRect(x: 0, y: 0, width: 480, height: 440), cornerRadius: 14)
             self.panel = panel
         }
         guard let panel else { return }
-        panel.title = "Pasteboard · \(kind.destination)授权"
+        panel.title = "Pasteboard · 权限设置"
         let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
         let frame = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
         panel.setFrameOrigin(NSPoint(x: max(frame.minX, frame.midX - panel.frame.width / 2), y: max(frame.minY, frame.midY - panel.frame.height / 2)))
-        panel.orderFrontRegardless()
+        panel.makeKeyAndOrderFront(nil)
         permissionTimer?.invalidate()
         permissionTimer = Timer.scheduledTimer(withTimeInterval: 0.75, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.state.refresh() }

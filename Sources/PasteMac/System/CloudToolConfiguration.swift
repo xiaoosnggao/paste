@@ -63,13 +63,71 @@ struct CloudToolConfiguration: Codable, Equatable, Sendable {
     var openAITranslationEndpoint = "https://api.openai.com/v1/chat/completions"
     var openAITranslationModel = "gpt-4o-mini"
     var microsoftRegion = ""
-    var ocrProviderTitle: String { ocrProvider.title }
-    var translationProviderTitle: String { translationProvider.title }
+    var aiServices: [AIServiceConfig] = []
+    var translationAIServiceID: UUID? = nil
+    var ocrAIServiceID: UUID? = nil
+    var ocrProviderTitle: String {
+        if let id = ocrAIServiceID, let service = aiServices.first(where: { $0.id == id }) {
+            let modelPart = service.ocrModel.isEmpty ? "" : " · \(service.ocrModel)"
+            return "\(service.name)\(modelPart)"
+        }
+        return ocrProvider.title
+    }
+    var translationProviderTitle: String {
+        if let id = translationAIServiceID, let service = aiServices.first(where: { $0.id == id }) {
+            let modelPart = service.translationModel.isEmpty ? "" : " · \(service.translationModel)"
+            return "\(service.name)\(modelPart)"
+        }
+        return translationProvider.title
+    }
+    /// Compare only the selected service; editing another service must not invalidate work.
+    func hasSameOCRSettings(as other: Self) -> Bool {
+        guard ocrAIServiceID == other.ocrAIServiceID else { return false }
+        if let id = ocrAIServiceID {
+            func selection(_ config: Self) -> AIServiceConfig? {
+                guard var service = config.aiServices.first(where: { $0.id == id }) else { return nil }
+                service.translationModel = ""
+                return service
+            }
+            return selection(self) == selection(other)
+        }
+        guard ocrProvider == other.ocrProvider else { return false }
+        switch ocrProvider {
+        case .system, .google: return true
+        case .volcengine: return ocrMode == other.ocrMode
+        case .tencent: return tencentRegion == other.tencentRegion && tencentAction == other.tencentAction
+        case .baidu: return baiduOCRMode == other.baiduOCRMode
+        case .openAICompatible: return openAIOCREndpoint == other.openAIOCREndpoint && openAIOCRModel == other.openAIOCRModel
+        }
+    }
+    func hasSameTranslationSettings(as other: Self) -> Bool {
+        guard sourceLanguage == other.sourceLanguage, targetLanguage == other.targetLanguage,
+              translationAIServiceID == other.translationAIServiceID else { return false }
+        if let id = translationAIServiceID {
+            func selection(_ config: Self) -> AIServiceConfig? {
+                guard var service = config.aiServices.first(where: { $0.id == id }) else { return nil }
+                service.ocrModel = ""
+                return service
+            }
+            return selection(self) == selection(other)
+        }
+        guard translationProvider == other.translationProvider else { return false }
+        switch translationProvider {
+        case .system, .youdao, .google: return true
+        case .zhipu: return zhipuModel == other.zhipuModel
+        case .openAICompatible: return openAITranslationEndpoint == other.openAITranslationEndpoint && openAITranslationModel == other.openAITranslationModel
+        case .microsoft: return microsoftRegion == other.microsoftRegion
+        }
+    }
+    func hasSameToolSettings(as other: Self) -> Bool {
+        hasSameOCRSettings(as: other) && hasSameTranslationSettings(as: other)
+    }
     init() {}
     enum CodingKeys: String, CodingKey {
         case ocrProvider, translationProvider, ocrMode, zhipuModel, targetLanguage, sourceLanguage
         case tencentRegion, tencentAction, baiduOCRMode, openAIOCREndpoint, openAIOCRModel
         case openAITranslationEndpoint, openAITranslationModel, microsoftRegion
+        case aiServices, translationAIServiceID, ocrAIServiceID
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -89,5 +147,8 @@ struct CloudToolConfiguration: Codable, Equatable, Sendable {
         openAITranslationEndpoint = try c.decodeIfPresent(String.self, forKey: .openAITranslationEndpoint) ?? openAITranslationEndpoint
         openAITranslationModel = try c.decodeIfPresent(String.self, forKey: .openAITranslationModel) ?? openAITranslationModel
         microsoftRegion = try c.decodeIfPresent(String.self, forKey: .microsoftRegion) ?? microsoftRegion
+        aiServices = try c.decodeIfPresent([AIServiceConfig].self, forKey: .aiServices) ?? []
+        translationAIServiceID = try c.decodeIfPresent(UUID.self, forKey: .translationAIServiceID)
+        ocrAIServiceID = try c.decodeIfPresent(UUID.self, forKey: .ocrAIServiceID)
     }
 }

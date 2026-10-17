@@ -11,8 +11,12 @@ extension CloudToolsService {
         return request
     }
     static func baseRequest(_ endpoint: String) throws -> URLRequest {
-        guard let components = URLComponents(string: endpoint), components.scheme == "https", let host = components.host,
-              !host.isEmpty, components.user == nil, components.password == nil, components.fragment == nil,
+        guard let components = URLComponents(string: endpoint),
+              let scheme = components.scheme,
+              let host = components.host,
+              !host.isEmpty,
+              (scheme == "https" || (scheme == "http" && (host == "localhost" || host == "127.0.0.1"))),
+              components.user == nil, components.password == nil, components.fragment == nil,
               components.query == nil, endpoint.utf8.count <= 2048, let url = components.url else { throw CloudToolsError.invalidConfiguration }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"; request.timeoutInterval = 60; request.httpShouldHandleCookies = false

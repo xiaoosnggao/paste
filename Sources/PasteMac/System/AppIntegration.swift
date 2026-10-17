@@ -26,9 +26,9 @@ final class AppIntegration {
             guard model.saveText(text, title: title, item: nil) else { throw Failure.rejected(model.statusMessage ?? "保存失败。") }
         case .copy(let id):
             guard !model.isPasting else { throw Failure.rejected("正在粘贴，请稍后重试。") }
-            guard let item = model.snapshot.items.first(where: { $0.id == id }) else { throw Failure.rejected("此项目已删除或过期。") }
+            guard let item = model.snapshot.items.first(where: { $0.id == id }) else { throw Failure.rejected("此卡片已删除或过期。") }
             try model.bridge.write([item], plainText: false)
-            model.statusMessage = "项目已复制"
+            model.statusMessage = "卡片已复制"
         }
     }
     func receive(_ url: URL) {
@@ -38,7 +38,7 @@ final class AppIntegration {
             case .add, .copy:
                 NSApp.activate()
                 let alert = NSAlert()
-                alert.messageText = command.isAdd ? "允许通过外部链接添加文本？" : "允许通过外部链接复制此项目？"
+                alert.messageText = command.isAdd ? "允许通过外部链接添加文本？" : "允许通过外部链接复制此卡片？"
                 alert.informativeText = "此操作来自外部链接，内容不会自动粘贴到其他应用。"
                 alert.addButton(withTitle: "允许"); alert.addButton(withTitle: "取消")
                 guard alert.runModal() == .alertFirstButtonReturn else { return }
@@ -78,7 +78,7 @@ struct AddClipboardTextIntent: AppIntent {
     }
 }
 struct CopyLatestClipboardIntent: AppIntent {
-    static var title: LocalizedStringResource = "复制最新剪贴板项目"
+    static var title: LocalizedStringResource = "复制最新剪贴板卡片"
     static var description = IntentDescription("将最新的历史记录复制到剪贴板。")
     static var openAppWhenRun = true
     @MainActor func perform() async throws -> some IntentResult {
@@ -91,6 +91,6 @@ struct PasteboardShortcuts: AppShortcutsProvider {
         AppShortcut(intent: OpenClipboardIntent(), phrases: ["打开 \(.applicationName) 剪贴板"], shortTitle: "打开剪贴板", systemImageName: "square.stack")
         AppShortcut(intent: SearchClipboardIntent(), phrases: ["在 \(.applicationName) 搜索剪贴板"], shortTitle: "搜索剪贴板", systemImageName: "magnifyingglass")
         AppShortcut(intent: AddClipboardTextIntent(), phrases: ["使用 \(.applicationName) 添加文本"], shortTitle: "添加文本", systemImageName: "plus.square")
-        AppShortcut(intent: CopyLatestClipboardIntent(), phrases: ["复制 \(.applicationName) 最新项目"], shortTitle: "复制最新项目", systemImageName: "doc.on.doc")
+        AppShortcut(intent: CopyLatestClipboardIntent(), phrases: ["复制 \(.applicationName) 最新卡片"], shortTitle: "复制最新卡片", systemImageName: "doc.on.doc")
     }
 }

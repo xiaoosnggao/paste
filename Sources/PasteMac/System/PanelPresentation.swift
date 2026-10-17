@@ -15,12 +15,12 @@ enum PanelPresentation {
 @MainActor
 final class PanelAnimationContainer: NSView {
     let surface: NSView
-    init(surface: NSView, frame: NSRect) {
+    init(surface: NSView, frame: NSRect, cornerRadius: CGFloat = 25) {
         self.surface = surface
         super.init(frame: frame)
         wantsLayer = true
         layer?.masksToBounds = true
-        layer?.cornerRadius = 25
+        layer?.cornerRadius = cornerRadius
         surface.frame = bounds
         surface.autoresizingMask = [.width, .height]
         addSubview(surface)
@@ -30,25 +30,25 @@ final class PanelAnimationContainer: NSView {
 
 @MainActor
 enum PanelGlassContainer {
-    static func make<Content: View>(content: Content, frame: NSRect) -> NSView {
+    static func make<Content: View>(content: Content, frame: NSRect, cornerRadius: CGFloat = 25) -> NSView {
         let hosting = NSHostingView(rootView: content)
         hosting.frame = NSRect(origin: .zero, size: frame.size)
         hosting.autoresizingMask = [.width, .height]
         if #available(macOS 26.0, *) {
             let glass = NSGlassEffectView(frame: frame)
             glass.style = .regular
-            glass.cornerRadius = 25
+            glass.cornerRadius = cornerRadius
             glass.contentView = hosting
-            return PanelAnimationContainer(surface: glass, frame: frame)
+            return PanelAnimationContainer(surface: glass, frame: frame, cornerRadius: cornerRadius)
         }
         let blur = NSVisualEffectView(frame: frame)
         blur.material = .hudWindow
         blur.blendingMode = .behindWindow
         blur.state = .active
         blur.wantsLayer = true
-        blur.layer?.cornerRadius = 25
+        blur.layer?.cornerRadius = cornerRadius
         blur.layer?.masksToBounds = true
         blur.addSubview(hosting)
-        return PanelAnimationContainer(surface: blur, frame: frame)
+        return PanelAnimationContainer(surface: blur, frame: frame, cornerRadius: cornerRadius)
     }
 }

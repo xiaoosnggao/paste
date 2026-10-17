@@ -5,3 +5,7 @@ dist/
 analysis/
 .omx/
 .claude/
+
+.signing-identity
+
+.swiftpm/

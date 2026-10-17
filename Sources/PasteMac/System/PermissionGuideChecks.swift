@@ -8,35 +8,46 @@ enum PermissionGuideChecks {
         func check(_ value: Bool, _ message: String) throws {
             guard value else { throw SystemChecks.Failure(message: "Permission guide: " + message) }; count += 1
         }
-        var probes: [PermissionGuideKind] = [], allowed = false, continued = 0
-        let state = PermissionGuideState { kind in probes.append(kind); return allowed }
-        try check(probes.isEmpty, "initialization checked privacy permissions")
-        state.present(.screenCapture, onContinue: { continued += 1 })
-        try check(probes == [.screenCapture] && !state.granted, "screenshot checked wrong permission")
+        let demo = AppModel(isDemo: true)
+        var demoGuides = 0
+        demo.onAccessibilityGuide = { demoGuides += 1 }
+        demo.requestDirectPastePermission()
+        try check(!demo.pasteEngine.accessibilityChecksEnabled, "demo setup enabled real permission queries")
+        try check(demoGuides == 1, "demo setup did not present guide")
+        var probes: [PermissionGuideKind] = [], accessibility = false, screen = false, continued = 0
+        let state = PermissionGuideState { kind in
+            probes.append(kind)
+            return kind == .screenCapture ? screen : accessibility
+        }
+        try check(probes.isEmpty, "initialization queried permissions")
+        state.present(.screenCapture) { continued += 1 }
+        try check(state.stepNumber == 1 && state.kind == .directPaste, "wizard did not start with shared accessibility permission")
         state.proceed()
-        try check(continued == 0, "unauthorized action resumed")
-        allowed = true; state.refresh()
-        try check(state.granted && continued == 0, "permission polling automatically resumed action")
-        state.proceed(); state.proceed()
-        try check(continued == 1, "authorized action ran more than once")
-        state.present(.selectionTranslation, onContinue: { continued += 10 })
-        try check(state.kind == .selectionTranslation, "selection guide retained screenshot instructions")
+        try check(state.stepNumber == 1 && continued == 0, "unverified step advanced")
+        accessibility = true; state.refresh()
+        try check(state.granted && state.stepNumber == 1 && continued == 0, "polling advanced workflow")
+        state.proceed()
+        try check(state.stepNumber == 2 && state.kind == .screenCapture && !state.granted, "screen permission skipped")
+        screen = true; state.proceed()
+        try check(state.isReview && state.stepNumber == 3 && continued == 0, "verification did not show completion review")
+        accessibility = false; state.proceed()
+        try check(state.stepNumber == 1 && continued == 0, "revoked permission passed completion")
+        accessibility = true; state.proceed(); state.proceed(); state.proceed(); state.proceed()
+        try check(continued == 1, "completion ran zero or multiple times")
+        state.present(.selectionTranslation) { continued += 10 }
+        try check(state.kind == .selectionTranslation, "selection context lost")
         state.dismiss(); state.proceed()
-        try check(continued == 1, "dismissed action resumed")
-        state.present(.directPaste, onContinue: { continued += 100 })
-        allowed = false; state.proceed()
-        try check(continued == 1 && !state.granted, "revoked permission allowed continuation")
-        try check(PermissionGuideKind.screenCapture.settingsTitle.contains("屏幕"), "screenshot points at Accessibility")
-        try check(PermissionGuideKind.selectionTranslation.settingsTitle.contains("辅助"), "selection points at screen recording")
-        try check(PermissionGuideKind.forError(ScreenshotCoordinator.Failure.permissionRequired) == .screenCapture, "capture permission failure not routed")
-        try check(PermissionGuideKind.forError(SelectedTextCapture.CaptureError.permission) == .selectionTranslation, "selection permission failure not routed")
-        try check(PermissionGuideKind.forError(ScreenshotCoordinator.Failure.timedOut) == nil, "capture timeout requests privacy access")
-        try check(PermissionGuideKind.forError(SelectedTextCapture.CaptureError.noSelection) == nil, "empty selection requests privacy access")
-        allowed = true
-        state.present(.screenCapture, onContinue: { continued += 1000 })
-        state.present(.selectionTranslation, onContinue: { continued += 1 })
-        state.proceed()
-        try check(continued == 2, "superseded guide resumed stale action")
+        try check(continued == 1, "dismissed workflow resumed")
+        state.present(.screenCapture) { continued += 100 }
+        state.present(.selectionTranslation) { continued += 1 }
+        state.proceed(); state.proceed(); state.proceed()
+        try check(continued == 2, "superseded action resumed")
+        try check(PermissionGuideKind.screenCapture.settingsTitle.contains("屏幕"), "wrong screenshot destination")
+        try check(PermissionGuideKind.selectionTranslation.settingsTitle.contains("辅助"), "wrong selection destination")
+        try check(PermissionGuideKind.forError(ScreenshotCoordinator.Failure.permissionRequired) == .screenCapture, "capture routing")
+        try check(PermissionGuideKind.forError(SelectedTextCapture.CaptureError.permission) == .selectionTranslation, "selection routing")
+        try check(PermissionGuideKind.forError(ScreenshotCoordinator.Failure.timedOut) == nil, "timeout requested permission")
+        try check(PermissionGuideKind.forError(SelectedTextCapture.CaptureError.noSelection) == nil, "empty selection requested permission")
         return count
     }
 }

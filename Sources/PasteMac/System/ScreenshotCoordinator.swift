@@ -2,6 +2,7 @@ import AppKit
 import ScreenCaptureKit
 import ImageIO
 import UniformTypeIdentifiers
+import OSLog
 
 /// Coordinates one user-initiated selection. It never requests or modifies TCC permission.
 @MainActor
@@ -47,9 +48,12 @@ final class ScreenshotCoordinator {
         global.offsetBy(dx: -screenFrame.minX, dy: -screenFrame.minY)
     }
     static var isPermissionGranted: Bool { CGPreflightScreenCaptureAccess() }
-    static func openPermissionSettings() {
+    /// Request access only from the explicit settings button, never from polling or recovery callbacks.
+    static func openPermissionSettings(requestAccess: Bool = false) {
+        if requestAccess { _ = CGRequestScreenCaptureAccess() }
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") { NSWorkspace.shared.open(url) }
     }
+    private let logger = Logger(subsystem: "com.gaoxs.pasteboard", category: "screenshot")
     private(set) var isCapturing = false
     private var token: UUID?
     private var cancelled = false
@@ -143,6 +147,7 @@ final class ScreenshotCoordinator {
             panel.title = "截图框选 · 拖动选择区域 · Esc 取消"
             panel.level = .screenSaver
             panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = false
+            panel.hidesOnDeactivate = false
             panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .canJoinAllApplications, .stationary]
             panel.isReleasedWhenClosed = false
             let view = RegionSelectionView(frame: CGRect(origin: .zero, size: screen.frame.size))
@@ -158,7 +163,8 @@ final class ScreenshotCoordinator {
             panel.contentView = view; overlay = panel
             panel.setFrame(screen.frame, display: false)
             NSApp.activate(ignoringOtherApps: true)
-            panel.makeKeyAndOrderFront(nil); panel.makeFirstResponder(view)
+            panel.makeKeyAndOrderFront(nil); panel.orderFrontRegardless(); panel.makeFirstResponder(view)
+            self.logger.notice("selection shown visible=\(panel.isVisible) key=\(panel.isKeyWindow)")
             NSCursor.crosshair.set()
         }
     }

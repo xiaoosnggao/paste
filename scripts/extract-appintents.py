@@ -7,7 +7,13 @@ import tempfile
 
 root = Path(__file__).resolve().parent.parent
 configuration, output = sys.argv[1], Path(sys.argv[2])
-objects = root / '.build' / 'out' / 'Intermediates.noindex' / 'Pasteboard.build' / configuration.capitalize() / 'Pasteboard-p.build' / 'Objects-normal'
+# Use the current build's output directory: SwiftPM's native engine and
+# Swift Build (Xcode 27 default) store constant values in different layouts.
+bin_path = Path(sys.argv[3]).resolve()
+if bin_path.parent.name == 'Products':
+    objects = bin_path.parent.parent / 'Intermediates.noindex' / 'Pasteboard.build' / configuration.capitalize() / 'Pasteboard-p.build' / 'Objects-normal'
+else:
+    objects = bin_path / 'PasteMac.build'
 values = sorted(objects.rglob('*.swiftconstvalues'))
 if not values:
     raise SystemExit('App Intents constant values missing; build with -emit-const-values first.')

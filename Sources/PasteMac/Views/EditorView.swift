@@ -21,7 +21,7 @@ struct EditorView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(item == nil ? "新建文本" : "编辑文本").font(.title2.bold())
-            TextField("标题（可选）", text: $title).textFieldStyle(.roundedBorder)
+            TextField("标题（可选）", text: $title).textFieldStyle(PasteboardTextFieldStyle())
             HStack(spacing: 6) {
                 Button { editor.toggleFontTrait(.boldFontMask) } label: { Image(systemName: "bold").frame(width: 23) }.help("粗体")
                 Button { editor.toggleFontTrait(.italicFontMask) } label: { Image(systemName: "italic").frame(width: 23) }.help("斜体")
@@ -30,7 +30,11 @@ struct EditorView: View {
                 Text("富文本").font(.caption).foregroundStyle(.secondary)
             }.buttonStyle(.borderless)
             RichTextEditor(value: $value, controller: editor)
-                .padding(8).background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
+                .padding(8).modifier(PasteboardInputSurface(focused: editor.focused, cornerRadius: 10))
+                .background(InputFocusOnAppear {
+                    guard let view = editor.textView else { return }
+                    view.window?.makeFirstResponder(view)
+                }.frame(width: 0, height: 0))
             HStack {
                 Text("\(value.string.count) 个字符").font(.caption).foregroundStyle(.secondary)
                 Spacer()
@@ -43,6 +47,7 @@ struct EditorView: View {
 }
 
 @MainActor final class RichTextEditorController: ObservableObject {
+    @Published var focused = false
     weak var textView: NSTextView?
 
     func toggleFontTrait(_ trait: NSFontTraitMask) {
@@ -93,10 +98,12 @@ struct RichTextEditor: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let scroll = NSTextView.scrollableTextView()
+        let scroll = NSScrollView()
         scroll.hasVerticalScroller = true
         scroll.drawsBackground = false
-        guard let view = scroll.documentView as? NSTextView else { return scroll }
+        let view = FocusTrackingTextView(frame: NSRect(x: 0, y: 0, width: 480, height: 240))
+        view.onFocusChange = { [weak controller] in controller?.focused = $0 }
+        scroll.documentView = view
         view.isRichText = true
         view.importsGraphics = false
         view.isAutomaticLinkDetectionEnabled = false
@@ -134,5 +141,21 @@ struct RichTextEditor: NSViewRepresentable {
             guard let view = notification.object as? NSTextView else { return }
             parent.value = NSAttributedString(attributedString: view.attributedString())
         }
+    }
+}
+
+/// NSTextView editing notifications begin on the first edit, so track responder
+/// transitions to show the focus border before the user starts typing.
+private final class FocusTrackingTextView: NSTextView {
+    var onFocusChange: ((Bool) -> Void)?
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        if accepted { onFocusChange?(true) }
+        return accepted
+    }
+    override func resignFirstResponder() -> Bool {
+        let accepted = super.resignFirstResponder()
+        if accepted { onFocusChange?(false) }
+        return accepted
     }
 }

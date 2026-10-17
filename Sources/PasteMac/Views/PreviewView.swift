@@ -35,7 +35,7 @@ struct PreviewView: View {
                 }
                 if let status = model.statusMessage { Text(status).font(.caption).foregroundStyle(.secondary) }
                 Text("\(value.characterCount) 个字符 · \(value.representations.count) 种数据格式").font(.caption).foregroundStyle(.secondary)
-            } else { ContentUnavailableView("此项目已删除", systemImage: "trash") }
+            } else { ContentUnavailableView("此卡片已删除", systemImage: "trash") }
         }
         .padding(24).frame(minWidth: 560, minHeight: 420)
         .task(id: current.map { PreviewImageRevision(id: $0.id, representations: $0.representations) }) { await loadThumbnail() }

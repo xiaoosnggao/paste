@@ -50,9 +50,11 @@ final class CloudToolsService: @unchecked Sendable {
     private let session: URLSession
     private let ownsSession: Bool
     private let credentialLoader: (CloudCredentialKind) -> String?
+    private let aiServiceKeyLoader: (UUID) -> String?
     private let redirectGuard = CloudRequestGuard()
-    init(session: URLSession = .shared, credentialLoader: @escaping (CloudCredentialKind) -> String? = CloudToolCredentials.read) {
+    init(session: URLSession = .shared, aiServiceKeyLoader: @escaping (UUID) -> String? = CloudToolCredentials.readAIServiceKey, credentialLoader: @escaping (CloudCredentialKind) -> String? = CloudToolCredentials.read) {
         self.credentialLoader = credentialLoader
+        self.aiServiceKeyLoader = aiServiceKeyLoader
         ownsSession = session === URLSession.shared
         if ownsSession {
             let configuration = URLSessionConfiguration.ephemeral
@@ -69,7 +71,8 @@ final class CloudToolsService: @unchecked Sendable {
     func recognize(image: Data, configuration: CloudToolConfiguration) async throws -> CloudOCRResponse {
         try Task.checkCancellation()
         guard !image.isEmpty else { throw CloudToolsError.invalidInput }
-        guard image.count <= (configuration.ocrProvider == .system ? 32 * 1024 * 1024 : Self.maximumImageBytes) else { throw CloudToolsError.inputTooLarge }
+        guard image.count <= (configuration.ocrProvider == .system && configuration.ocrAIServiceID == nil ? 32 * 1024 * 1024 : Self.maximumImageBytes) else { throw CloudToolsError.inputTooLarge }
+        if configuration.ocrAIServiceID != nil { return try await recognizeProvider(image: image, configuration: configuration) }
         if configuration.ocrProvider == .system { return try await Self.systemOCR(image) }
         if configuration.ocrProvider == .volcengine {
             let request = try Self.ocrRequest(image: image, configuration: configuration, date: Date(), accessKey: credential(.volcAccessKey), secretKey: credential(.volcSecretKey))
@@ -84,6 +87,33 @@ final class CloudToolsService: @unchecked Sendable {
         guard Self.validLanguage(configuration.sourceLanguage), Self.validLanguage(configuration.targetLanguage), configuration.targetLanguage != "auto" else { throw CloudToolsError.invalidConfiguration }
         return try await translateProvider(text: text, configuration: configuration)
     }
+    func testAIService(config: AIServiceConfig, key: String) async throws {
+        let endpoint = config.endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !endpoint.isEmpty else { throw CloudToolsError.invalidConfiguration }
+        let testModel = !config.translationModel.isEmpty ? config.translationModel : (!config.ocrModel.isEmpty ? config.ocrModel : "gpt-4o-mini")
+        guard config.isEnabled, Self.validModel(testModel) else { throw CloudToolsError.invalidConfiguration }
+        let headers = try Self.aiAuthorizationHeaders(key: key, vendor: config.vendor)
+        let body: [String: Any] = [
+            "model": testModel,
+            "stream": false,
+            "max_tokens": 64,
+            "messages": [["role": "user", "content": "Reply with exactly OK."]]
+        ]
+        let request = try Self.jsonRequest(endpoint, body: body, headers: headers)
+        let data = try await perform(request)
+        _ = try Self.parseTranslation(data, allowTruncation: true)
+    }
+    func aiAuthorizationHeaders(for service: AIServiceConfig) throws -> [String: String] {
+        try Self.aiAuthorizationHeaders(key: aiServiceKeyLoader(service.id) ?? "", vendor: service.vendor)
+    }
+    private static func aiAuthorizationHeaders(key: String, vendor: AIVendor) throws -> [String: String] {
+        guard !key.isEmpty else {
+            if vendor == .ollama { return [:] }
+            throw CloudToolsError.authentication
+        }
+        guard key.utf8.count <= 4096, key.utf8.allSatisfy({ (33...126).contains($0) }) else { throw CloudToolsError.invalidCredential }
+        return ["Authorization": "Bearer " + key]
+    }
     func credential(_ kind: CloudCredentialKind) throws -> String {
         guard let value = credentialLoader(kind), !value.isEmpty else { throw CloudToolsError.missingCredential(kind) }
         guard value.utf8.count <= 4096, value.utf8.allSatisfy({ (33...126).contains($0) }),
@@ -96,7 +126,9 @@ final class CloudToolsService: @unchecked Sendable {
             defer { bytes.task.cancel() }
             try Task.checkCancellation()
             guard let http = response as? HTTPURLResponse else { throw CloudToolsError.invalidResponse }
-            guard http.url?.scheme == "https", http.url?.host == request.url?.host else { throw CloudToolsError.redirectRejected }
+            guard let scheme = http.url?.scheme,
+                  (scheme == "https" || (scheme == "http" && (http.url?.host == "localhost" || http.url?.host == "127.0.0.1"))),
+                  http.url?.host == request.url?.host else { throw CloudToolsError.redirectRejected }
             switch http.statusCode {
             case 200: break
             case 300..<400: throw CloudToolsError.redirectRejected
@@ -170,12 +202,12 @@ final class CloudToolsService: @unchecked Sendable {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw CloudToolsError.emptyResult }
         return .init(text: text)
     }
-    static func parseTranslation(_ data: Data) throws -> CloudTranslationResponse {
+    static func parseTranslation(_ data: Data, allowTruncation: Bool = false) throws -> CloudTranslationResponse {
         guard data.count <= maximumResponseBytes, let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let model = object["model"] as? String, validModel(model),
               let choices = object["choices"] as? [[String: Any]], let choice = choices.first,
               let finish = choice["finish_reason"] as? String, let message = choice["message"] as? [String: Any] else { throw CloudToolsError.invalidResponse }
-        guard finish == "stop", message["function_call"] == nil, message["tool_calls"] == nil || (message["tool_calls"] as? [Any])?.isEmpty == true else { throw CloudToolsError.incompleteTranslation }
+        guard (finish == "stop" || (allowTruncation && finish == "length")), message["function_call"] == nil, message["tool_calls"] == nil || (message["tool_calls"] as? [Any])?.isEmpty == true else { throw CloudToolsError.incompleteTranslation }
         guard let text = message["content"] as? String else { throw CloudToolsError.invalidResponse }
         guard text.utf8.count <= maximumResultBytes else { throw CloudToolsError.responseTooLarge }
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw CloudToolsError.emptyResult }

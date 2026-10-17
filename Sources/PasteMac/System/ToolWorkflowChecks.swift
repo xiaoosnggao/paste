@@ -19,7 +19,7 @@ enum ToolWorkflowChecks {
         let operations = ToolOperations(recognize: { _, _ in .init(text: "Hello OCR") }, translate: { text, _ in .init(text: "译文：\(text)", model: "fixture") })
         func make(_ operations: ToolOperations) -> AppModel {
             let model = AppModel(isDemo: true, storageDirectory: root, bridge: bridge, toolOperations: operations, toolDefaults: defaults)
-            model.snapshot = .init(); return model
+            model.snapshot = .init(); model.toolSessionActive = true; return model
         }
         let model = make(operations)
         let id = model.addScreenshot(image, translateAfter: true)
@@ -47,6 +47,16 @@ enum ToolWorkflowChecks {
         model.recognizeItem(model.activeToolItem!)
         try await finished(model)
         try check(model.snapshot.items.count == 3 && model.activeToolItem?.id == id, "re-recognition changed original ID")
+
+        let recognizeOnly = make(operations)
+        _ = recognizeOnly.addScreenshot(image, translateAfter: false)
+        try await finished(recognizeOnly)
+        try check(recognizeOnly.activeToolItem?.enrichment?.ocr?.text == "Hello OCR" && recognizeOnly.activeToolItem?.enrichment?.translation == nil,
+                  "explicit OCR-only action unexpectedly translated")
+        recognizeOnly.recognizeItem(recognizeOnly.activeToolItem!, translateAfter: true)
+        try await finished(recognizeOnly)
+        try check(recognizeOnly.activeToolItem?.enrichment?.translation?.translatedText == "译文：Hello OCR",
+                  "re-recognition with translation stopped after OCR")
 
         let failed = make(.init(recognize: { _, _ in throw CloudToolsError.authentication }, translate: { _, _ in throw CloudToolsError.authentication }))
         let failedID = failed.addScreenshot(image, translateAfter: true)
@@ -123,6 +133,83 @@ enum ToolWorkflowChecks {
         selected.beginSelectedTextTranslation("Selected sample")
         try await finished(selected)
         try check(selected.snapshot.items.count == 2 && selected.activeToolItem?.text == "Selected sample", "selected text was not saved separately from translation")
+        let untranslatedImage = make(operations)
+        let imageCard = ClipItem(text: "", kind: .image, representations: [.init(type: NSPasteboard.PasteboardType.png.rawValue, data: image)])
+        untranslatedImage.snapshot.items = [imageCard]
+        untranslatedImage.translateItem(imageCard); try await finished(untranslatedImage)
+        try check(untranslatedImage.activeToolItem?.enrichment?.translation?.translatedText == "译文：Hello OCR",
+                  "translating an unrecognized image did not automatically recognize first")
+        untranslatedImage.lastToolOperation = .screenshotOCR
+        untranslatedImage.showToolItem(untranslatedImage.activeToolItem!)
+        try check(untranslatedImage.lastToolOperation == .screenshotTranslate,
+                  "opening a translated image inherited another card's OCR-only mode")
+        let emptyOCR = make(.init(recognize: { _, _ in .init(text: " \n ") }, translate: { _, _ in throw CloudToolsError.authentication }))
+        _ = emptyOCR.addScreenshot(image, translateAfter: true); try await finished(emptyOCR)
+        try check(emptyOCR.toolError == "未识别到文字，请重新截图。" && emptyOCR.lastToolOperation == .screenshotTranslate,
+                  "empty OCR reached translation or lost screenshot retry intent")
+        let clipboardRetry = make(operations)
+        clipboardRetry.lastToolOperation = .screenshotOCR
+        board.clearContents()
+        clipboardRetry.performTool(.clipboardTranslate)
+        board.setString("New clipboard text", forType: .string)
+        clipboardRetry.retryToolOperation(); try await finished(clipboardRetry)
+        try check(clipboardRetry.activeToolItem?.enrichment?.translation?.sourceText == "New clipboard text",
+                  "failed clipboard capture retry did not re-read the clipboard")
+        let settings = make(.init(recognize: { _, config in .init(text: "OCR \(config.ocrProvider.rawValue)") },
+                                  translate: { text, config in .init(text: "\(config.targetLanguage):\(config.translationProvider.rawValue):\(text)", model: "fixture") }))
+        settings.toolInputText = "Language change"
+        settings.translateToolInput(); try await finished(settings)
+        var configuration = settings.toolConfiguration
+        configuration.targetLanguage = "ja"
+        settings.toolConfiguration = configuration; try await finished(settings)
+        try check(settings.activeToolItem?.enrichment?.translation?.translatedText == "ja:system:Language change" && !settings.toolTranslationIsStale,
+                  "target language selection did not automatically update translation")
+        configuration.translationProvider = .google
+        settings.toolConfiguration = configuration; try await finished(settings)
+        try check(settings.activeToolItem?.enrichment?.translation?.translatedText == "ja:google:Language change",
+                  "translation provider selection did not automatically update translation")
+        settings.toolConfiguration.targetLanguage = "fr"
+        try check(settings.toolTranslationIsStale, "old target-language result was not marked stale")
+        settings.toolConfiguration = configuration
+        settings.toolConfiguration.translationProvider = .system
+        try check(settings.toolTranslationIsStale, "old provider result was not marked stale")
+        _ = settings.addScreenshot(image, translateAfter: true); try await finished(settings)
+        configuration = settings.toolConfiguration; configuration.ocrProvider = .baidu
+        settings.toolConfiguration = configuration; try await finished(settings)
+        try check(settings.activeToolItem?.enrichment?.translation?.sourceText == "OCR baidu",
+                  "OCR provider change stopped before translation")
+        // Use an untranslated image to assert explicit OCR-only processing stays local to that mode.
+        let ocrSettings = make(operations)
+        _ = ocrSettings.addScreenshot(image, translateAfter: false); try await finished(ocrSettings)
+        configuration = ocrSettings.toolConfiguration; configuration.ocrProvider = .tencent
+        ocrSettings.toolConfiguration = configuration; try await finished(ocrSettings)
+        try check(ocrSettings.activeToolItem?.enrichment?.translation != nil,
+                  "OCR service change did not automatically translate")
+        let saveRetry = make(operations)
+        var recognizedCard = imageCard
+        recognizedCard.enrichment = .init(ocr: .init(text: "Previous OCR", provider: "fixture"))
+        saveRetry.snapshot.items = [recognizedCard]
+        saveRetry.snapshot.preferences.maxHistoryItems = 1
+        saveRetry.showToolItem(recognizedCard)
+        saveRetry.toolInputText = "Edited source to preserve"
+        saveRetry.translateToolInput()
+        try check(saveRetry.toolError != nil && saveRetry.lastToolOperation == .inputTranslate,
+                  "translation source save failure retained OCR-only retry intent")
+        saveRetry.retryToolOperation(); try await finished(saveRetry)
+        try check(saveRetry.toolInputText == "Edited source to preserve",
+                  "retry after source save failure discarded edited source")
+        let captioned = make(operations)
+        var captionedImage = imageCard; captionedImage.text = "Image metadata"
+        captioned.snapshot.items = [captionedImage]
+        captioned.translateItem(captionedImage); try await finished(captioned)
+        try check(captioned.activeToolItem?.enrichment?.translation?.sourceText == "Hello OCR",
+                  "image translation translated metadata instead of recognizing the image")
+        let screenshotRoutes = make(operations)
+        var screenshotRequests: [Bool] = []
+        screenshotRoutes.onScreenshotTool = { screenshotRequests.append($0) }
+        screenshotRoutes.performTool(.screenshotOCR)
+        screenshotRoutes.retryToolOperation()
+        try check(screenshotRequests == [true, true], "screenshot recognition and retry did not request automatic translation")
         let full = make(operations)
         full.snapshot.preferences.maxHistoryItems = 1
         let originalID = full.addScreenshot(image, translateAfter: false)

@@ -9,16 +9,17 @@ struct SettingsView: View {
     @State private var recording = false
     @State private var recordingStack = false
     @State private var deleteConfirmation = false
-    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     private enum SettingsPage: String, CaseIterable, Identifiable {
-        case general = "通用", privacy = "隐私", shortcuts = "快捷键", tools = "识别与翻译", integrations = "系统集成"
+        case general = "通用", ai = "AI 服务", tools = "识别与翻译", shortcuts = "快捷键", privacy = "隐私", integrations = "系统集成"
         var id: String { rawValue }
         var symbol: String {
             switch self {
             case .general: return "gearshape"
-            case .privacy: return "hand.raised"
-            case .shortcuts: return "keyboard"
+            case .ai: return "sparkles"
             case .tools: return "viewfinder"
+            case .shortcuts: return "keyboard"
+            case .privacy: return "hand.raised"
             case .integrations: return "puzzlepiece.extension"
             }
         }
@@ -40,7 +41,7 @@ struct SettingsView: View {
                 Spacer()
                 Text("剪贴板历史管理").font(.caption).foregroundStyle(.secondary).padding(14)
             }.padding(.horizontal, 10).frame(width: 200)
-                .background(colorScheme == .dark ? Color(red: 0.17, green: 0.14, blue: 0.21) : Color(nsColor: .windowBackgroundColor))
+                .background(Color(nsColor: .windowBackgroundColor).opacity(reduceTransparency ? 1 : 0.12))
             VStack(alignment: .leading, spacing: 0) {
                 Text(page.rawValue).font(.system(size: 16, weight: .bold)).padding(.horizontal, 25).padding(.top, 20).padding(.bottom, 12)
                 Form {
@@ -52,14 +53,15 @@ struct SettingsView: View {
                     }
                     switch page {
                     case .general: general
-                    case .privacy: privacy
-                    case .shortcuts: shortcuts
+                    case .ai: AIServiceSettingsView(model: model)
                     case .tools: CloudToolSettingsView(model: model)
+                    case .shortcuts: shortcuts
+                    case .privacy: privacy
                     case .integrations: integrations
                     }
                 }.formStyle(.grouped).scrollContentBackground(.hidden)
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(colorScheme == .dark ? Color(red: 0.12, green: 0.115, blue: 0.13) : Color(nsColor: .controlBackgroundColor))
+                .background(Color(nsColor: .controlBackgroundColor).opacity(reduceTransparency ? 1 : 0.18))
         }.frame(minWidth: 640, minHeight: 520).ignoresSafeArea(.container, edges: .top)
             .confirmationDialog("删除全部未收藏的历史记录？", isPresented: $deleteConfirmation) {
                 Button("删除历史记录", role: .destructive) { model.clearHistory() }
@@ -82,9 +84,6 @@ struct SettingsView: View {
         Section("剪贴板") {
             Toggle("记录剪贴板历史", isOn: preference(\.monitoringEnabled))
             Toggle("粘贴到当前应用", isOn: preference(\.pasteToFrontmost))
-            Text("直接粘贴需要辅助功能权限。未授权时，可复制内容后按 ⌘V 粘贴。")
-                .font(.caption).foregroundStyle(.secondary)
-            Button("设置直接粘贴…", action: model.requestDirectPastePermission)
             Toggle("始终粘贴为纯文本", isOn: preference(\.alwaysPlainText))
             Toggle("复制时播放音效", isOn: preference(\.soundEnabled))
         }
@@ -187,7 +186,7 @@ struct SettingsView: View {
         Section("面板操作") {
             shortcutRow("搜索", "⌘F")
             shortcutRow("选择上一项 / 下一项", "← / →")
-            shortcutRow("粘贴所选项目", "↩")
+            shortcutRow("粘贴所选卡片", "↩")
             shortcutRow("粘贴为纯文本", "⇧↩")
             shortcutRow("快速粘贴", "⌘1…9")
             shortcutRow("关闭面板", "Esc")
@@ -203,7 +202,7 @@ struct SettingsView: View {
             Text("历史记录保存在此 Mac。可通过菜单栏或快捷键打开剪贴板。")
         }
         Section("系统动作") {
-                    Text("快捷指令支持打开剪贴板、搜索、添加文本和复制最新项目。此版本的应用签名可能限制动作运行。")
+                    Text("在快捷指令中打开剪贴板、搜索、添加文本或复制最新卡片。")
                     Text("可在快捷指令的“打开 URL”动作中使用以下链接。搜索词需进行 URL 编码。")
                         .font(.caption).foregroundStyle(.secondary)
             Text("pasteboard://open\npasteboard://search?query=关键词").font(.caption.monospaced()).textSelection(.enabled)

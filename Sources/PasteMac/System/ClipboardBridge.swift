@@ -117,9 +117,9 @@ enum ClipboardError: LocalizedError {
         switch self {
         case .tooLarge: return "内容超过 32 MB，未保存到历史记录。"
         case .textTooLarge: return "文本超过 2 MB，未保存到历史记录。"
-        case .tooManyFormats: return "剪贴板项目或格式过多，未保存到历史记录。"
-        case .emptySelection: return "请选择一个项目。"
-        case .noPlainText: return "此项目没有可粘贴的纯文本。"
+        case .tooManyFormats: return "剪贴板卡片或格式过多，未保存到历史记录。"
+        case .emptySelection: return "请选择一张卡片。"
+        case .noPlainText: return "此卡片没有可粘贴的纯文本。"
         case .writeFailed: return "写入系统剪贴板失败，请重试。"
         }
     }

@@ -1,5 +1,6 @@
 #if DEBUG
 import Foundation
+import AppKit
 
 @MainActor
 enum CloudToolsChecks {
@@ -23,9 +24,9 @@ enum CloudToolsChecks {
         configuration.connectionProxyDictionary = [:]
         let session = URLSession(configuration: configuration)
         defer { session.invalidateAndCancel(); CloudFixtureProtocol.reset() }
-        let service = CloudToolsService(session: session) { kind in
+        let service = CloudToolsService(session: session, credentialLoader: { kind in
             switch kind { case .volcAccessKey: return "test-ak"; case .volcSecretKey: return "test-sk"; case .zhipuAPIKey: return "fixture-only-api-key"; default: return nil }
-        }
+        })
         func fixture(_ status: Int = 200, _ value: [String: Any]) throws {
             CloudFixtureProtocol.set(.response(status, try JSONSerialization.data(withJSONObject: value), [:]))
         }
@@ -109,6 +110,138 @@ enum CloudToolsChecks {
         do { _ = try await task.value; throw CloudToolsError.invalidResponse }
         catch is CancellationError { try check(true, "structured cancellation") }
         try check(CloudFixtureProtocol.lastRequest()?.url?.host == "open.bigmodel.cn", "fixtures never use a nonofficial endpoint")
+
+        // MARK: - AI Services Checks
+        let testServiceID = UUID()
+        let dsService = AIServiceConfig(id: testServiceID, name: "DeepSeek", vendor: .deepseek)
+        try check(dsService.translationModel == "deepseek-chat", "DeepSeek default translation model")
+        try check(dsService.endpoint == "https://api.deepseek.com/v1/chat/completions", "DeepSeek default endpoint")
+        try check(dsService.vendor.apiKeyHelpURL != nil, "DeepSeek apiKeyHelpURL present")
+
+        let oaiService = AIServiceConfig(id: UUID(), name: "OpenAI", vendor: .openai)
+        try check(oaiService.translationModel == "gpt-4o-mini" && oaiService.ocrModel == "gpt-4o", "OpenAI default models")
+
+        let ollamaService = AIServiceConfig(id: UUID(), name: "Ollama", vendor: .ollama)
+        try check(ollamaService.endpoint == "http://localhost:11434/v1/chat/completions", "Ollama localhost endpoint")
+
+        // Editor validation is pure: rejected edits never need a network or Keychain call.
+        var paddedEditor = dsService
+        paddedEditor.name = "  Translation \n"
+        paddedEditor.endpoint = "  https://api.deepseek.com/v1/chat/completions \n"
+        paddedEditor.translationModel = " deepseek-chat "
+        paddedEditor.ocrModel = "  "
+        let cleanedEditor = try AIServiceEditorSheet.validatedService(paddedEditor)
+        try check(cleanedEditor.name == "Translation" && cleanedEditor.endpoint == dsService.endpoint
+                  && cleanedEditor.translationModel == "deepseek-chat" && cleanedEditor.ocrModel.isEmpty,
+                  "AI service editor trims names endpoint and model fields")
+        func rejectedEditor(_ input: AIServiceConfig, _ label: String) throws {
+            do { _ = try AIServiceEditorSheet.validatedService(input) }
+            catch { try check(true, label); return }
+            throw CloudCheckFailure(message: label)
+        }
+        var emptyNameEditor = dsService; emptyNameEditor.name = " \n"
+        try rejectedEditor(emptyNameEditor, "AI service editor rejects blank name")
+        var emptyModelsEditor = dsService
+        emptyModelsEditor.translationModel = " "; emptyModelsEditor.ocrModel = ""
+        try rejectedEditor(emptyModelsEditor, "AI service editor rejects both models empty")
+        var insecureEditor = dsService; insecureEditor.endpoint = "http://api.deepseek.com/v1/chat/completions"
+        try rejectedEditor(insecureEditor, "AI service editor rejects remote cleartext HTTP")
+        let cleanedLocal = try AIServiceEditorSheet.validatedService(ollamaService)
+        try check(cleanedLocal.endpoint == ollamaService.endpoint, "AI service editor permits local Ollama")
+
+        // JSON Roundtrip check
+        var aiToolConfig = CloudToolConfiguration()
+        aiToolConfig.aiServices = [dsService, oaiService]
+        aiToolConfig.translationAIServiceID = testServiceID
+        aiToolConfig.ocrAIServiceID = oaiService.id
+
+        let encodedConfig = try JSONEncoder().encode(aiToolConfig)
+        let decodedConfig = try JSONDecoder().decode(CloudToolConfiguration.self, from: encodedConfig)
+        try check(decodedConfig.aiServices.count == 2, "AI services count preserved")
+        try check(decodedConfig.translationAIServiceID == testServiceID, "translationAIServiceID preserved")
+        try check(decodedConfig.ocrAIServiceID == oaiService.id, "ocrAIServiceID preserved")
+        try check(decodedConfig.translationProviderTitle == "DeepSeek · deepseek-chat", "translationProviderTitle format")
+        try check(decodedConfig.ocrProviderTitle == "OpenAI · gpt-4o", "ocrProviderTitle format")
+
+        // Deterministic credential injection: fixtures never read or write the user's Keychain.
+        let aiService = CloudToolsService(session: session, aiServiceKeyLoader: { id in
+            id == testServiceID ? "sk-ai-mock-key" : "sk-oai-mock-key"
+        })
+        let noAIKey = CloudToolsService(session: session, aiServiceKeyLoader: { _ in nil })
+        let invalidAIKey = CloudToolsService(session: session, aiServiceKeyLoader: { _ in "key\r\nAuthorization: bad" })
+        try await failure(.authentication) { _ = try await noAIKey.translate(text: "hello", configuration: aiToolConfig) }
+        try await failure(.invalidCredential) { _ = try await invalidAIKey.translate(text: "hello", configuration: aiToolConfig) }
+        var disabledAI = aiToolConfig; disabledAI.aiServices[0].isEnabled = false
+        try await failure(.invalidConfiguration) { _ = try await aiService.translate(text: "hello", configuration: disabledAI) }
+        var missingAI = aiToolConfig; missingAI.translationAIServiceID = UUID()
+        try await failure(.invalidConfiguration) { _ = try await aiService.translate(text: "hello", configuration: missingAI) }
+        var invalidAIModel = aiToolConfig; invalidAIModel.aiServices[0].translationModel = "bad model"
+        try await failure(.invalidConfiguration) { _ = try await aiService.translate(text: "hello", configuration: invalidAIModel) }
+        try check(try CloudToolsService.baseRequest("http://localhost:11434/v1/chat/completions").url?.host == "localhost", "localhost HTTP allowed")
+        try check(try CloudToolsService.baseRequest("http://127.0.0.1:11434/v1/chat/completions").url?.host == "127.0.0.1", "loopback HTTP allowed")
+        try await failure(.invalidConfiguration) { _ = try CloudToolsService.baseRequest("http://example.com/v1/chat/completions") }
+
+        // AI Translation request test
+        try fixture(200, ["model": "deepseek-chat", "choices": [["finish_reason": "stop", "message": ["content": "这是大模型翻译结果"]]]])
+        let aiTransResult = try await aiService.translate(text: "This is test text", configuration: aiToolConfig)
+        try check(aiTransResult.text == "这是大模型翻译结果", "AI translation result text")
+        try check(aiTransResult.provider == "DeepSeek (deepseek-chat)", "AI translation provider label")
+
+        let aiTransReq = CloudFixtureProtocol.lastRequest()
+        try check(aiTransReq?.url?.host == "api.deepseek.com", "AI translation host route")
+        try check(aiTransReq?.value(forHTTPHeaderField: "Authorization") == "Bearer sk-ai-mock-key", "AI translation Authorization header")
+        let aiTransBody = try CloudFixtureProtocol.lastBody().flatMap { try JSONSerialization.jsonObject(with: $0) } as? [String: Any]
+        try check(aiTransBody?["model"] as? String == "deepseek-chat", "AI translation body model")
+        try check(aiTransBody?["temperature"] == nil, "compatible AI requests omit optional temperature")
+
+        // AI OCR request test
+
+        try fixture(200, ["model": "gpt-4o", "choices": [["finish_reason": "stop", "message": ["content": "图片识别出的文本"]]]])
+        let pngHeader = Data([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+        let aiOCRResult = try await aiService.recognize(image: pngHeader, configuration: aiToolConfig)
+        try check(aiOCRResult.text == "图片识别出的文本", "AI OCR result text")
+        try check(aiOCRResult.provider == "OpenAI (gpt-4o)", "AI OCR provider label")
+
+        let aiOCRReq = CloudFixtureProtocol.lastRequest()
+        try check(aiOCRReq?.url?.host == "api.openai.com", "AI OCR host route")
+        try check(aiOCRReq?.value(forHTTPHeaderField: "Authorization") == "Bearer sk-oai-mock-key", "AI OCR Authorization header")
+        var disabledOCR = aiToolConfig; disabledOCR.aiServices[1].isEnabled = false
+        try await failure(.invalidConfiguration) { _ = try await aiService.recognize(image: pngHeader, configuration: disabledOCR) }
+        var missingOCR = aiToolConfig; missingOCR.ocrAIServiceID = UUID()
+        try await failure(.invalidConfiguration) { _ = try await aiService.recognize(image: pngHeader, configuration: missingOCR) }
+        var invalidOCRModel = aiToolConfig; invalidOCRModel.aiServices[1].ocrModel = ""
+        try await failure(.invalidConfiguration) { _ = try await aiService.recognize(image: pngHeader, configuration: invalidOCRModel) }
+        try await failure(.authentication) { _ = try await noAIKey.recognize(image: pngHeader, configuration: aiToolConfig) }
+        try await failure(.invalidCredential) { _ = try await invalidAIKey.recognize(image: pngHeader, configuration: aiToolConfig) }
+        guard let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 2, pixelsHigh: 2,
+                                           bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true,
+                                           isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+              let pixels = bitmap.bitmapData else { throw CloudCheckFailure(message: "TIFF fixture bitmap") }
+        pixels.initialize(repeating: 255, count: bitmap.bytesPerRow * bitmap.pixelsHigh)
+        guard let tiff = bitmap.representation(using: .tiff, properties: [:]) else { throw CloudCheckFailure(message: "TIFF fixture encoding") }
+        try fixture(200, ["model": "gpt-4o", "choices": [["finish_reason": "stop", "message": ["content": "TIFF OCR"]]]])
+        let preparedOCR = try await ToolOperations.live(service: aiService).recognize(tiff, aiToolConfig)
+        try check(preparedOCR.text == "TIFF OCR", "AI OCR prepares historical TIFF with default Apple provider")
+        let preparedBody = try CloudFixtureProtocol.lastBody().flatMap { try JSONSerialization.jsonObject(with: $0) } as? [String: Any]
+        let preparedMessages = preparedBody?["messages"] as? [[String: Any]]
+        let preparedContent = preparedMessages?.first?["content"] as? [[String: Any]]
+        let imageURL = (preparedContent?.last?["image_url"] as? [String: String])?["url"] ?? ""
+        try check(imageURL.hasPrefix("data:image/png;base64,") || imageURL.hasPrefix("data:image/jpeg;base64,"), "AI OCR upload uses supported image data URI")
+
+
+        // Test testAIService method
+        try fixture(200, ["model": "deepseek-chat", "choices": [["finish_reason": "stop", "message": ["content": "OK"]]]])
+        try await service.testAIService(config: dsService, key: "sk-test-key")
+        try check(true, "testAIService completed successfully")
+
+        try fixture(200, ["model": "deepseek-chat", "choices": [["finish_reason": "length", "message": ["content": "OK"]]]])
+        try await aiService.testAIService(config: dsService, key: "sk-test-key")
+        try check(true, "connection probe accepts valid truncated completion")
+        try await failure(.invalidCredential) { try await aiService.testAIService(config: dsService, key: "key\ninvalid") }
+        try await failure(.authentication) { try await aiService.testAIService(config: dsService, key: "") }
+        try fixture(200, ["model": "llava", "choices": [["finish_reason": "stop", "message": ["content": "OK"]]]])
+        try await aiService.testAIService(config: ollamaService, key: "")
+        try check(CloudFixtureProtocol.lastRequest()?.value(forHTTPHeaderField: "Authorization") == nil, "Ollama permits absent key")
         return count
     }
 }

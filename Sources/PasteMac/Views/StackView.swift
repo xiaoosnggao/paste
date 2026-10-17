@@ -8,13 +8,13 @@ struct StackView: View {
             HStack {
                 Label("连续粘贴", systemImage: "square.stack.3d.up.fill").font(.headline)
                 Spacer()
-                Text("\(model.stackItems.count) 个项目").font(.caption).foregroundStyle(.secondary)
+                Text("\(model.stackItems.count) 张卡片").font(.caption).foregroundStyle(.secondary)
             }
             if model.stackItems.isEmpty {
                 VStack(spacing: 10) {
                     Image(systemName: "square.stack.3d.up").font(.system(size: 35)).foregroundStyle(.secondary)
-                    Text("添加项目后，按顺序逐项粘贴")
-                    Button("添加所选项目") { model.setStack(model.selectedItems) }.disabled(model.selectedItems.isEmpty)
+                    Text("添加卡片后，按顺序逐项粘贴")
+                    Button("添加所选卡片") { model.setStack(model.selectedItems) }.disabled(model.selectedItems.isEmpty)
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List {
@@ -38,7 +38,7 @@ struct StackView: View {
                 Button("清空") { model.setStack([]) }.disabled(model.stackItems.isEmpty)
                 Button("粘贴下一项", action: model.pasteNextStack).keyboardShortcut(.defaultAction).disabled(model.stackItems.isEmpty)
             }
-            Text("在目标应用中放置光标，再点击“粘贴下一项”。粘贴后自动移除该项目。") .font(.caption).foregroundStyle(.secondary)
+            Text("在目标应用中放置光标，再点击“粘贴下一项”。粘贴后自动移除该卡片。") .font(.caption).foregroundStyle(.secondary)
         }.padding(20).frame(minWidth: 440, minHeight: 340)
     }
     private var orderedItems: [ClipItem] { model.stackReversed ? Array(model.stackItems.reversed()) : model.stackItems }
