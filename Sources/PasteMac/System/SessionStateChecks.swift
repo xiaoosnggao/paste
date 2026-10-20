@@ -63,12 +63,12 @@ enum SessionStateChecks {
         timed.flushPersistence()
         let afterFailedPaste = try repository.load()
         try check(timed.stackItems.map(\.id) == [image.id] && afterFailedPaste.session?.stackItemIDs == [image.id], "failed paste consumed stack entry")
-        let savedBeforeDemo = try Data(contentsOf: directory.appendingPathComponent("clipboard.json"))
+        let savedBeforeDemo = try repository.load()
         let demo = AppModel(isDemo: true, storageDirectory: directory, bridge: bridge)
         demo.setStack(Array(demo.snapshot.items.prefix(2)))
         demo.pause(minutes: nil)
         demo.flushPersistence()
-        try check(try Data(contentsOf: directory.appendingPathComponent("clipboard.json")) == savedBeforeDemo, "demo changed real session file")
+        try check(try repository.load() == savedBeforeDemo, "demo changed real session file")
         return count
     }
 }

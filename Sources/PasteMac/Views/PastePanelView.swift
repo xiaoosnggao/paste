@@ -4,6 +4,7 @@ import PasteCore
 
 struct PastePanelView: View {
     @ObservedObject var model: AppModel
+    @State private var classificationBoard: Pinboard?
     @State private var renamingBoard: UUID?
     @State private var renameText = ""
     @State private var searchFocused = false
@@ -14,14 +15,24 @@ struct PastePanelView: View {
             toolbar
             Color.clear.frame(height: 17)
             deck.frame(height: 242)
-            footer.padding(.top, 4).frame(height: 24)
+            if model.contextSuggestionsPresented {
+                ContextSuggestionsView(model: model)
+                    .frame(height: PanelPresentation.suggestionContentHeight + model.suggestionAdditionalHeight)
+                    .padding(.top, PanelPresentation.suggestionSpacing)
+                    .transition(.opacity)
+            }
         }
-        .padding(.top, 14).padding(.bottom, 1)
-        .frame(maxWidth: .infinity, alignment: .top)
+        .padding(.top, 14).padding(.bottom, 15)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .foregroundStyle(PanelPalette.text)
+        .tint(PanelPalette.accent)
+        .background(Color.clear)
         .clipShape(RoundedRectangle(cornerRadius: 25))
+        .overlay(alignment: .bottomTrailing) { statusNotice }
         .onChange(of: model.isSearchVisible) { _, visible in searchFocused = visible }
         .onChange(of: model.queryString) { _, _ in model.selectFirstIfNeeded() }
         .onChange(of: model.filter) { _, _ in model.selectFirstIfNeeded() }
+        .sheet(item: $classificationBoard) { board in CategoryClassificationSettings(model: model, board: board) }
         .onChange(of: model.selectedPinboardID) { _, _ in model.selectFirstIfNeeded() }
     }
 
@@ -32,9 +43,14 @@ struct PastePanelView: View {
                 ScrollViewReader { proxy in
                     ScrollView(.horizontal) {
                         LazyHStack(spacing: 14) {
+                            if model.historyPageOffset > 0 {
+                                Button("上一页", action: model.loadPreviousHistoryPage).buttonStyle(.bordered)
+                            }
                             ForEach(Array(model.visibleItems.enumerated()), id: \.element.id) { index, item in
-                                ClipCard(item: item, selected: model.selectedIDs.contains(item.id), index: index)
+                                ClipCard(item: item, selected: model.selectedIDs.contains(item.id), index: index, categories: model.categories(for: item.id))
                                     .id(item.id)
+                                    .onAppear { model.loadDisplayPayload(item.id) }
+                                    .onDisappear { model.releaseDisplayPayload(item.id) }
                                     .gesture(TapGesture(count: 2).exclusively(before: TapGesture(count: 1)).onEnded { result in
                                         switch result {
                                         case .first: model.activate(item)
@@ -56,7 +72,13 @@ struct PastePanelView: View {
                                         return true
                                     }
                             }
+                            if model.historyHasMore {
+                                Button { if let last = model.historyResultIDs.last { model.loadNextHistoryPage(after: last) } } label: {
+                                    Label(model.historyLoading ? "读取中" : "更多", systemImage: "chevron.right")
+                                }.buttonStyle(.bordered).disabled(model.historyLoading)
+                            }
                         }.padding(.horizontal, 20).padding(.vertical, 5)
+                            .horizontalScrollWheelRouting()
                     }.scrollIndicators(.never)
                         .onChange(of: model.selectedIDs) { _, ids in
                             if let id = ids.first { withAnimation(.easeOut(duration: 0.18)) { proxy.scrollTo(id) } }
@@ -65,24 +87,22 @@ struct PastePanelView: View {
             }
     }
 
-    private var footer: some View {
+    @ViewBuilder private var statusNotice: some View {
+        if model.storageError != nil || model.pasteFailureText != nil || (model.statusMessage != nil && model.statusMessage != "已复制") {
             HStack(spacing: 8) {
-                if model.isDemo { Text("演示模式").foregroundStyle(.orange) }
-                if let error = model.storageError {
-                    Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange).lineLimit(1).help(error)
+                Text(model.storageError ?? model.pasteFailureText ?? model.statusMessage ?? "")
+                    .font(.system(size: 11)).lineLimit(2)
+                if model.storageError != nil {
                     Button("重试保存", action: model.retrySave).buttonStyle(.plain).foregroundStyle(Color.accentColor)
-                } else if let failure = model.pasteFailureText {
-                    Label(failure, systemImage: "exclamationmark.circle").foregroundStyle(.orange).lineLimit(1).help(failure)
                 } else {
-                    Text(model.statusMessage ?? (model.isPaused ? "剪贴板记录已暂停" : "\(model.visibleItems.count) 张卡片"))
+                    Button { model.statusMessage = nil; model.pasteIssue = nil } label: { Image(systemName: "xmark") }
+                        .buttonStyle(.plain).accessibilityLabel("关闭提示")
                 }
-                Spacer()
-                ViewThatFits(in: .horizontal) {
-                    Text("单击选择 · 双击或 ↩ 粘贴    ⇧↩ 纯文本    ⌘1–9 快速粘贴")
-                    Text("双击或 ↩ 粘贴")
-                    Color.clear.frame(width: 0, height: 0)
-                }
-            }.font(.system(size: 10)).foregroundStyle(.secondary).padding(.horizontal, 22)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+            .padding(.horizontal, 22).padding(.bottom, 10)
+        }
     }
 
     private var toolbar: some View {
@@ -91,23 +111,22 @@ struct PastePanelView: View {
             let searchWidth = min(180, available * 0.35)
             let controlsWidth: CGFloat = model.isSearchVisible ? 240 + searchWidth : 192
             let boardWidth = min(620, boardToolbarWidth, max(0, available - controlsWidth))
-            ZStack {
+            ZStack(alignment: .trailing) {
                 HStack(spacing: 8) {
                     Button { model.usesRecommendations.toggle() } label: {
                         Image(systemName: "sparkles").font(.system(size: 15)).frame(width: 32, height: 32).contentShape(Rectangle())
-                            .foregroundStyle(model.usesRecommendations ? Color.accentColor : Color.primary)
-                    }.buttonStyle(.plain).focusEffectDisabled().help("按当前应用和最近使用情况推荐")
+                    }.buttonStyle(PanelControlStyle(selected: model.usesRecommendations)).focusEffectDisabled().help("按当前应用和最近使用情况推荐")
                     .accessibilityValue(model.usesRecommendations ? "已开启" : "未开启")
                     Button { model.isSearchVisible.toggle() } label: {
                         Image(systemName: "magnifyingglass").font(.system(size: 15, weight: .medium)).frame(width: 32, height: 32).contentShape(Rectangle())
-                    }.buttonStyle(.plain).focusEffectDisabled().help("搜索 ⌘F")
+                    }.buttonStyle(PanelControlStyle(selected: model.isSearchVisible)).focusEffectDisabled().help("搜索 ⌘F")
                     Button { model.performTool(.screenshotOCR) } label: {
                         Label("截图", systemImage: "camera.viewfinder")
                             .font(.system(size: 12, weight: .medium)).frame(width: 64, height: 32).contentShape(Rectangle())
-                    }.buttonStyle(.plain).focusEffectDisabled().help("截图识别")
+                    }.buttonStyle(PanelControlStyle()).focusEffectDisabled().help("截图识别")
                     if model.isSearchVisible {
-                        PanelInputField(placeholder: "搜索剪贴板", text: $model.queryString, focused: $searchFocused,
-                                        onSubmit: { model.activateSelected(plainText: NSEvent.modifierFlags.contains(.shift)) },
+                        PanelInputField(placeholder: "搜索或描述要找的内容", text: $model.queryString, focused: $searchFocused,
+                                        onSubmit: model.submitHistorySearch,
                                         onCancel: { model.isSearchVisible = false; model.queryString = ""; searchFocused = false })
                             .padding(.horizontal, 9).frame(width: searchWidth, height: 32)
                             .modifier(PasteboardInputSurface(focused: searchFocused))
@@ -130,6 +149,7 @@ struct PastePanelView: View {
                                     boardPill(board.name, id: board.id, color: Color(hex: board.colorHex))
                                         .contextMenu {
                                             Button("重命名") { beginRename(board.id, name: board.name) }
+                                            Button("自动归类设置…") { classificationBoard = board }
                                             Button("向左移动") { model.movePinboard(board.id, delta: -1) }
                                             Button("向右移动") { model.movePinboard(board.id, delta: 1) }
                                             Button("删除收藏夹", role: .destructive) { model.deletePinboard(board.id) }
@@ -145,9 +165,10 @@ struct PastePanelView: View {
                     }.scrollIndicators(.never).frame(width: boardWidth, height: 32)
                     Button(action: createBoard) {
                         Image(systemName: "plus").frame(width: 32, height: 32).contentShape(Rectangle())
-                    }.buttonStyle(.plain).focusEffectDisabled().help("新建收藏夹")
+                    }.buttonStyle(PanelControlStyle()).focusEffectDisabled().help("新建收藏夹")
                 }.frame(width: min(available, controlsWidth + boardWidth), height: 32)
-                HStack { Spacer(); appMenu }.padding(.horizontal, 22)
+                    .frame(maxWidth: .infinity)
+                appMenu.padding(.trailing, 22)
             }
         }.frame(height: 32)
     }
@@ -193,10 +214,10 @@ struct PastePanelView: View {
                 Text(title).font(.system(size: 12, weight: selected ? .semibold : .medium))
                     .lineLimit(1).truncationMode(.tail)
             }
-            .foregroundStyle(selected ? Color.white : Color.primary)
+            .foregroundStyle(selected ? PanelPalette.selectionText : PanelPalette.text)
             .padding(.horizontal, 13).frame(height: 32).frame(maxWidth: 160)
-            .background(selected ? Color.accentColor : Color.primary.opacity(0.045), in: Capsule())
-            .overlay(Capsule().strokeBorder(selected ? Color.white.opacity(0.18) : Color.primary.opacity(0.09), lineWidth: 0.75))
+            .background(selected ? PanelPalette.selection : PanelPalette.raised, in: Capsule())
+            .overlay(Capsule().strokeBorder(selected ? PanelPalette.border : PanelPalette.border.opacity(0.45), lineWidth: 0.75))
             .contentShape(Capsule())
         }
         .buttonStyle(.plain).focusEffectDisabled().help(title)
@@ -229,7 +250,7 @@ struct PastePanelView: View {
             Button("清除筛选") { model.filter = ClipFilter(); model.queryString = "" }
         } label: {
             Image(systemName: "line.3.horizontal.decrease.circle")
-                .foregroundStyle(model.filter.kind != nil || model.filter.sourceBundleID != nil || model.filter.since != nil ? Color.blue : Color.secondary)
+                .foregroundStyle(model.filter.kind != nil || model.filter.sourceBundleID != nil || model.filter.since != nil ? PanelPalette.accent : PanelPalette.secondaryText)
         }.menuStyle(.borderlessButton).menuIndicator(.hidden).focusEffectDisabled().frame(width: 32, height: 32)
     }
 
@@ -271,6 +292,13 @@ struct PastePanelView: View {
         Button("粘贴") { ensureSelection(item); model.activateSelected() }
         Button("粘贴为纯文本") { ensureSelection(item); model.activateSelected(plainText: true) }
         Button("复制") { ensureSelection(item); model.copySelected() }
+        if let candidates = model.suggestedCategories[item.id], !candidates.isEmpty {
+            Menu("建议分类") {
+                ForEach(model.snapshot.pinboards.filter { candidates.contains($0.id) }) { board in
+                    Button(board.name) { ensureSelection(item); model.pinSelection(to: board.id) }
+                }
+            }
+        }
         Menu("添加到收藏夹") {
             ForEach(model.snapshot.pinboards) { board in
                 Button(board.name) { ensureSelection(item); model.pinSelection(to: board.id) }
@@ -316,35 +344,22 @@ struct ClipCard: View {
     let item: ClipItem
     let selected: Bool
     let index: Int
-    private var tint: Color {
-        switch item.sourceBundleID {
-        case "com.apple.Notes": return Color(red: 0.82, green: 0.62, blue: 0.15)
-        case "com.apple.Safari", "com.google.Chrome": return Color(red: 0.24, green: 0.52, blue: 0.95)
-        case "com.openai.chat": return Color(red: 0.03, green: 0.06, blue: 0.20)
-        case "com.apple.iWork.Pages": return Color(red: 0.92, green: 0.48, blue: 0.12)
-        case "com.apple.dt.Xcode": return Color(red: 0.15, green: 0.49, blue: 0.77)
-        default: break
-        }
-        switch item.kind {
-        case .image: return Color(red: 0.40, green: 0.36, blue: 0.71)
-        case .link: return Color(red: 0.17, green: 0.53, blue: 0.78)
-        case .color: return Color(hex: item.text)
-        case .file: return Color(red: 0.70, green: 0.47, blue: 0.25)
-        default: return Color(red: 0.34, green: 0.55, blue: 0.49)
-        }
-    }
+    var categories: [Pinboard] = []
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .center) {
+            HStack(spacing: 8) {
+                SourceIcon(item: item).frame(width: 24, height: 24)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(item.kind.displayName).font(.system(size: 13, weight: .semibold))
-                    TimelineView(.periodic(from: .now, by: 60)) { context in
-                        Text(relativeTime(now: context.date)).font(.system(size: 11)).opacity(0.8)
-                    }
+                    Text(item.sourceName.isEmpty ? "剪贴板" : item.sourceName)
+                        .font(.system(size: 12, weight: .medium)).lineLimit(1)
+                    Text(item.kind.displayName).font(.system(size: 11)).foregroundStyle(selected ? PanelPalette.selectionSecondaryText : PanelPalette.secondaryText)
                 }
-                Spacer()
-                SourceIcon(item: item).frame(width: 56, height: 56).padding(.trailing, -7)
-            }.padding(.leading, 13).frame(height: 48).background(tint).clipped()
+                Spacer(minLength: 4)
+                TimelineView(.periodic(from: .now, by: 60)) { context in
+                    Text(relativeTime(now: context.date)).font(.system(size: 10))
+                        .foregroundStyle(selected ? PanelPalette.selectionSecondaryText : PanelPalette.secondaryText).lineLimit(1)
+                }
+            }.padding(.horizontal, 12).frame(height: 48).background(selected ? PanelPalette.selection : PanelPalette.raised)
             VStack(alignment: .leading, spacing: 8) {
                 if item.kind == .image {
                     CardThumbnail(item: item)
@@ -353,26 +368,30 @@ struct ClipCard: View {
                 } else if item.kind == .color {
                     RoundedRectangle(cornerRadius: 12).fill(Color(hex: item.text)).overlay(Text(item.text).font(.system(.title3, design: .monospaced)).shadow(radius: 2))
                 } else if item.kind == .file {
-                    Image(systemName: "doc.fill").font(.system(size: 36)).foregroundStyle(.white.opacity(0.7))
+                    Image(systemName: "doc.fill").font(.system(size: 36)).foregroundStyle(selected ? PanelPalette.selectionSecondaryText : PanelPalette.secondaryText)
                     Text(item.title.isEmpty ? item.filePaths.first ?? "文件" : item.title).font(.system(size: 16, weight: .medium)).lineLimit(3)
                 } else {
                     Text(item.text).font(.system(size: 13)).lineSpacing(3).lineLimit(item.enrichment == nil ? 7 : 3).frame(maxWidth: .infinity, alignment: .topLeading)
                 }
                 if let translation = item.enrichment?.translation {
-                    Text(translation.translatedText).font(.system(size: 11)).lineLimit(2).foregroundStyle(.white.opacity(0.8))
+                    Text(translation.translatedText).font(.system(size: 11)).lineLimit(2).foregroundStyle(selected ? PanelPalette.selectionSecondaryText : PanelPalette.secondaryText)
                 }
                 if item.enrichment != nil { ClipEnrichmentBadge(item: item) }
+                if let category = categories.first {
+                    Label(category.name + (categories.count > 1 ? " +\(categories.count - 1)" : ""), systemImage: "folder")
+                        .font(.system(size: 10)).foregroundStyle(selected ? PanelPalette.selectionSecondaryText : PanelPalette.secondaryText).lineLimit(1)
+                }
                 Spacer(minLength: 0)
                 HStack {
                     Text(item.kind == .file ? "\(item.filePaths.count) 个文件" : "\(item.enrichment?.ocr?.text.count ?? item.characterCount) 个字符").lineLimit(1)
                     Spacer()
                     if index < 9 { Text("⌘\(index + 1)") }
-                }.font(.system(size: 10)).foregroundStyle(.white.opacity(0.45))
+                }.font(.system(size: 10)).foregroundStyle(selected ? PanelPalette.selectionSecondaryText : PanelPalette.secondaryText)
             }.padding(16).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .background(Color(white: 0.065))
-        }.frame(width: 230, height: 232).foregroundStyle(.white)
-            .clipShape(RoundedRectangle(cornerRadius: 20))
-            .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(selected ? Color.accentColor : Color.white.opacity(0.12), lineWidth: selected ? 3 : 0.5))
+                .background(selected ? PanelPalette.selection : PanelPalette.surface)
+        }.frame(width: 230, height: 232).foregroundStyle(selected ? PanelPalette.selectionText : PanelPalette.text)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(selected ? PanelPalette.selectionBorder : PanelPalette.border.opacity(0.45), lineWidth: selected ? 2 : 0.75))
             .shadow(color: .black.opacity(0.18), radius: 6, y: 3)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("\(item.kind.displayName)，\(item.sourceName)，\(item.title)")

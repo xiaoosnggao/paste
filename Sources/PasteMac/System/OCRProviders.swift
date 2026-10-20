@@ -43,7 +43,7 @@ extension CloudToolsService {
                 ["type": "image_url", "image_url": ["url": "data:\(mime);base64," + image.base64EncodedString()]]
             ]
             let headers = try aiAuthorizationHeaders(for: service)
-            let req = try Self.jsonRequest(endpoint, body: ["model": model, "stream": false, "max_tokens": 8192, "messages": [["role": "user", "content": content]]], headers: headers)
+            let req = try Self.aiJSONRequest(service: service, body: ["model": model, "stream": false, "max_tokens": 8192, "messages": [["role": "user", "content": content]]], headers: headers)
             let data = try await perform(req)
             try Task.checkCancellation()
             let parsedText = try Self.parseProviderOCR(data, provider: .openAICompatible)

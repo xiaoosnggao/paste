@@ -101,13 +101,13 @@ final class EnrichmentTests: XCTestCase {
         ]
         for enrichment in values { XCTAssertThrowsError(try repository.validate(.init(items: [image(enrichment: enrichment)]))) }
     }
-    func testEnrichmentCountsTowardRetentionAndRepositoryTotal() {
+    func testEnrichmentHasNoTotalRetentionBudget() {
         var large = image()
         large.representations = [.init(type: "public.png", data: Data(count: 47 * 1024 * 1024))]
         large.originalRepresentations = nil
         large.enrichment = .init(ocr: .init(text: String(repeating: "x", count: 2 * 1024 * 1024)))
-        XCTAssertTrue(SnapshotOperations.prune(.init(items: [large])).items.isEmpty)
+        XCTAssertEqual(SnapshotOperations.prune(.init(items: [large])).items.count, 1)
         large.representations = [.init(type: "public.png", data: Data(count: 63 * 1024 * 1024))]
-        XCTAssertThrowsError(try SnapshotRepository(directory: FileManager.default.temporaryDirectory).validate(.init(items: [large])))
+        XCTAssertNoThrow(try SnapshotRepository(directory: FileManager.default.temporaryDirectory).validate(.init(items: [large])))
     }
 }

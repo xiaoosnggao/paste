@@ -49,12 +49,21 @@ public struct ClipEnrichment: Codable, Equatable, Sendable {
     }
 }
 public struct ClipDerivation: Codable, Equatable, Sendable {
-    public enum Operation: String, Codable, Sendable { case ocr, translation }
+    public enum Operation: String, Codable, Sendable { case ocr, translation, aiTransform }
     public var sourceItemID: UUID
+    public var additionalSourceItemIDs: [UUID]?
+    public var sourceItemIDs: [UUID] { [sourceItemID] + (additionalSourceItemIDs ?? []) }
     public var operation: Operation
     public var provider: String
     public init(sourceItemID: UUID, operation: Operation, provider: String) {
         self.sourceItemID = sourceItemID; self.operation = operation; self.provider = provider
+    }
+    public init(sourceItemIDs: [UUID], operation: Operation, provider: String) {
+        precondition(!sourceItemIDs.isEmpty)
+        var seen = Set<UUID>()
+        let sources = sourceItemIDs.filter { seen.insert($0).inserted }
+        self.sourceItemID = sources[0]; self.additionalSourceItemIDs = Array(sources.dropFirst())
+        self.operation = operation; self.provider = provider
     }
 }
 public struct ClipItem: Identifiable, Codable, Equatable, Sendable {
@@ -112,6 +121,15 @@ public struct ClipItem: Identifiable, Codable, Equatable, Sendable {
         return translation.sourceText != source
     }
     public var fingerprint: String { fingerprintValue }
+    /// A display projection; persist only materialized items. Keeps durable identity for request keys.
+    public func metadataOnly(fingerprint: String? = nil) -> ClipItem {
+        var value = self
+        value.representations = []
+        if value.originalRepresentations != nil { value.originalRepresentations = [] }
+        value.fingerprintValue = fingerprint ?? fingerprintValue
+        return value
+    }
+
     private func makeFingerprint() -> String {
         var hasher = SHA256()
         func append(_ data: Data) {
@@ -140,6 +158,9 @@ public struct Pinboard: Identifiable, Codable, Equatable, Sendable {
     public var name: String
     public var colorHex: String
     public var itemIDs: [UUID]
+    public var classificationDescription: String?
+    public var classificationKeywords: [String]?
+    public var automaticClassification: Bool?
     public init(id: UUID = UUID(), name: String, colorHex: String = "#F5B64A", itemIDs: [UUID] = []) { self.id = id; self.name = name; self.colorHex = colorHex; self.itemIDs = itemIDs }
 }
 public struct AppPreferences: Codable, Equatable, Sendable {
@@ -150,16 +171,18 @@ public struct AppPreferences: Codable, Equatable, Sendable {
     public var ignoreTransient = true
     public var ignoreGenerated = true
     public var ignoredBundleIDs = ["com.apple.keychainaccess"]
-    public var retentionDays: Int? = 30
-    public var maxHistoryItems = 1000
+    public var retentionDays: Int? = nil
+    public var maxHistoryItems = Int.max
     public var soundEnabled = false
     public init() {}
 }
 public struct ClipFilter: Equatable, Sendable {
     public var kind: ClipKind?
     public var sourceBundleID: String?
+    public var sourceName: String?
     public var since: Date?
-    public init(kind: ClipKind? = nil, sourceBundleID: String? = nil, since: Date? = nil) { self.kind = kind; self.sourceBundleID = sourceBundleID; self.since = since }
+    public var until: Date?
+    public init(kind: ClipKind? = nil, sourceBundleID: String? = nil, sourceName: String? = nil, since: Date? = nil, until: Date? = nil) { self.kind = kind; self.sourceBundleID = sourceBundleID; self.sourceName = sourceName; self.since = since; self.until = until }
 }
 public struct SessionState: Codable, Equatable, Sendable {
     public var stackItemIDs: [UUID]

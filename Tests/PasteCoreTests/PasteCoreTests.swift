@@ -54,20 +54,20 @@ final class PasteCoreTests: XCTestCase {
         XCTAssertEqual(SnapshotOperations.filteredItems(in: snapshot, query: "alpha", pinboardID: nil, filter: .init()).map(\.id), [first.id, second.id])
         XCTAssertTrue(SnapshotOperations.filteredItems(in: snapshot, query: "", pinboardID: UUID(), filter: .init()).isEmpty)
     }
-    func testRetentionProtectsPinsAndEnforcesHistoryLimit() {
+    func testLegacyRetentionNeverRemovesHistory() {
         let old = clip("old", date: Date(timeIntervalSince1970: 0))
         let first = clip("first")
         let second = clip("second")
         var snapshot = ClipboardSnapshot(items: [first, second, old], pinboards: [.init(name: "Keep", itemIDs: [old.id])])
         snapshot.preferences.maxHistoryItems = 1
         snapshot.preferences.retentionDays = 1
-        XCTAssertEqual(SnapshotOperations.prune(snapshot).items.map(\.id), [first.id, old.id])
+        XCTAssertEqual(SnapshotOperations.prune(snapshot).items.map(\.id), [first.id, second.id, old.id])
     }
-    func testByteBudgetPrunesLargeHistoryButProtectsPins() {
+    func testLargeHistoryRemainsWithoutByteBudget() {
         let small = clip("small")
         let large = clip("image", representations: [.init(type: "public.png", data: Data(count: 49 * 1024 * 1024))])
         let unpinned = ClipboardSnapshot(items: [small, large])
-        XCTAssertEqual(SnapshotOperations.prune(unpinned).items.map(\.id), [small.id])
+        XCTAssertEqual(SnapshotOperations.prune(unpinned).items.map(\.id), [small.id, large.id])
         let pinned = ClipboardSnapshot(items: [small, large], pinboards: [.init(name: "Keep", itemIDs: [large.id])])
         XCTAssertEqual(SnapshotOperations.prune(pinned).items.map(\.id), [small.id, large.id])
     }
@@ -106,8 +106,8 @@ final class PasteCoreTests: XCTestCase {
         try repository.save(changed)
         XCTAssertEqual(try repository.load(), changed)
         let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
-        XCTAssertEqual(files.count, 1)
-        let permissions = try FileManager.default.attributesOfItem(atPath: files[0].path)[.posixPermissions] as? NSNumber
+        XCTAssertTrue(files.contains { $0.lastPathComponent == "clipboard.sqlite" })
+        let permissions = try FileManager.default.attributesOfItem(atPath: repository.databaseURL.path)[.posixPermissions] as? NSNumber
         XCTAssertEqual(permissions?.intValue, 0o600)
     }
     func testCorruptAndUnsupportedStoresThrow() throws {
@@ -115,7 +115,7 @@ final class PasteCoreTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
         let repository = SnapshotRepository(directory: directory)
         try repository.save(.init())
-        let file = try XCTUnwrap(FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil).first)
+        let file = repository.databaseURL
         try Data("broken".utf8).write(to: file)
         XCTAssertThrowsError(try repository.load())
         XCTAssertEqual(try Data(contentsOf: file), Data("broken".utf8))
@@ -140,7 +140,7 @@ final class PasteCoreTests: XCTestCase {
         }
         var invalid = ClipboardSnapshot()
         invalid.preferences.maxHistoryItems = -1
-        XCTAssertThrowsError(try repository.save(invalid))
+        XCTAssertNoThrow(try repository.save(invalid)) // Legacy retention is ignored.
         let duplicateFormat = clip("a", representations: [.init(type: "public.text", data: Data([1])), .init(type: "public.text", data: Data([2]))])
         XCTAssertThrowsError(try repository.save(.init(items: [duplicateFormat])))
         let negative = clip("a", representations: [.init(type: "x", data: Data(), itemIndex: -1)])
@@ -215,13 +215,13 @@ final class PasteCoreTests: XCTestCase {
         XCTAssertEqual(undone.items.first?.id, later.id)
     }
 
-    func testPinnedBytesReduceAvailableHistoryBudget() {
+    func testPinnedBytesNeverCauseHistoryLoss() {
         let pinned = clip("Pinned", representations: [.init(type: "public.png", data: Data(count: 40 * 1024 * 1024))])
         let tooLarge = clip("Too large", representations: [.init(type: "public.png", data: Data(count: 22 * 1024 * 1024))])
         let small = clip("Small", representations: [.init(type: "public.png", data: Data(count: 10 * 1024 * 1024))])
         let snapshot = ClipboardSnapshot(items: [tooLarge, small, pinned], pinboards: [.init(name: "Keep", itemIDs: [pinned.id])])
         let pruned = SnapshotOperations.prune(snapshot)
-        XCTAssertEqual(pruned.items.map(\.id), [small.id, pinned.id])
+        XCTAssertEqual(pruned.items.map(\.id), [tooLarge.id, small.id, pinned.id])
         XCTAssertNoThrow(try SnapshotRepository(directory: FileManager.default.temporaryDirectory).validate(pruned))
     }
     func testValidationRejectsInvalidAdmissionWithoutWriting() throws {

@@ -37,7 +37,7 @@ public enum AIVendor: String, Codable, CaseIterable, Identifiable, Sendable {
 
     public var defaultTranslationModel: String {
         switch self {
-        case .deepseek: return "deepseek-chat"
+        case .deepseek: return "deepseek-flash"
         case .openai: return "gpt-4o-mini"
         case .moonshot: return "moonshot-v1-8k"
         case .zhipu: return "glm-4-flash"

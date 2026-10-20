@@ -25,6 +25,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private var editorWindow: NSWindow?
     private var previewWindow: NSWindow?
     private var intelligenceWindow: NSWindow?
+    private var suggestionResultWindow: NSWindow?
+    private var historyManagementWindow: NSWindow?
     private var mcpService: MCPService!
     private var stackWindow: NSWindow?
     private var shortcut: GlobalShortcut!
@@ -33,6 +35,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private var outsideClickMonitor: Any?
     private var panelPresented = false
     private var presentationGeneration = 0
+    private let panelFrameAnimator = PanelFrameAnimator()
+    private var pendingSuggestionResize: Task<Void, Never>?
     private var pasteHideWaiters: [CheckedContinuation<Void, Never>] = []
     private var toolWindow: ClipboardPanel?
     private let toolWindowPosition = ToolWindowPositionStore()
@@ -55,6 +59,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         model.onClose = { [weak self] in self?.hidePanel(restoreTarget: true) }
         model.onPreparePaste = { [weak self] in await self?.hidePanelForPaste() }
         model.onPasteFailure = { [weak self] in self?.showPanel(rememberTarget: false) }
+        model.onSuggestionPreview = { [weak self] result in
+            guard let self else { return }
+            self.hidePanel()
+            self.model.retainHistory(result.sourceIDs, for: "suggestion")
+            self.suggestionResultWindow = self.window(title: "处理结果", size: .init(width: 700, height: 540), view: ContextSuggestionResultPreview(model: self.model, result: result))
+            NSApp.activate(); self.suggestionResultWindow?.makeKeyAndOrderFront(nil)
+        }
+        model.onHistoryManagementClose = { [weak self] in self?.historyManagementWindow?.close() }
+        model.onHistoryManagementPreview = { [weak self] preview in
+            guard let self else { return }
+            self.historyManagementWindow = self.window(title: "搜索操作", size: .init(width: 480, height: 340), view: HistorySearchManagementView(model: self.model, preview: preview))
+            NSApp.activate(); self.historyManagementWindow?.makeKeyAndOrderFront(nil)
+        }
+        model.onSuggestionPanelChange = { [weak self] _ in self?.resizePanelForSuggestions() }
+        model.pasteEngine.onTargetChange = { [weak self] in self?.model.scheduleContextSuggestions() }
         model.onSettings = { [weak self] in self?.showSettings() }
         model.onAccessibilityGuide = { [weak self] in
             guard let self else { return }
@@ -134,11 +153,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     private func showPanel(rememberTarget: Bool = true) {
         guard !model.isPasting, screenshotTask == nil, !screenshotCoordinator.isCapturing else { return }
+        cancelSuggestionResize()
         if rememberTarget { model.pasteEngine.rememberTarget() }
         model.refreshDirectPastePermission()
+        model.suggestionSessionActive = true
+        model.selectFirstIfNeeded()
+        model.scheduleContextSuggestions()
         let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
         let frame = screen?.frame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-        let destination = PanelPresentation.visibleFrame(on: frame)
+        let destination = PanelPresentation.visibleFrame(on: frame, suggestionsVisible: model.contextSuggestionsPresented, additionalHeight: model.suggestionAdditionalHeight)
         presentationGeneration += 1
         let wasPresented = panelPresented
         panelPresented = true
@@ -148,7 +171,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             panelSurface.frame = PanelPresentation.hiddenContentFrame(size: destination.size)
             panel.alphaValue = 0.85
         }
-        model.selectFirstIfNeeded()
         panel.makeKeyAndOrderFront(nil)
         if reduceMotion || wasPresented {
             panelSurface.frame = NSRect(origin: .zero, size: destination.size)
@@ -162,14 +184,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             }
         }
     }
+    private func resizePanelForSuggestions() {
+        pendingSuggestionResize?.cancel()
+        // Summary, loading and expansion change together. Read the final layout once.
+        pendingSuggestionResize = Task { @MainActor [weak self] in
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            self?.applySuggestionPanelSize()
+        }
+    }
+    private func applySuggestionPanelSize() {
+        guard panelPresented, model.suggestionSessionActive, !model.isPasting, let panel, let screen = panel.screen else { return }
+        let destination = PanelPresentation.visibleFrame(on: screen.frame, suggestionsVisible: model.contextSuggestionsPresented, additionalHeight: model.suggestionAdditionalHeight)
+        panelFrameAnimator.animate(panel, to: destination, reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+    }
+    private func cancelSuggestionResize() {
+        pendingSuggestionResize?.cancel(); pendingSuggestionResize = nil
+        panelFrameAnimator.cancel()
+    }
     private func hidePanel(restoreTarget: Bool = false) {
-        guard panel.isVisible else { return }
         panelPresented = false
+        cancelSuggestionResize()
+        guard panel.isVisible else { model?.suggestionSessionActive = false; finishPasteHide(); return }
         presentationGeneration += 1
         let generation = presentationGeneration
         let finish = { [weak self] in
             guard let self, self.presentationGeneration == generation, !self.panelPresented else { return }
             self.panel.orderOut(nil)
+            // Keep the summary intact until the surface has left the screen.
+            self.model?.suggestionSessionActive = false
             self.panel.alphaValue = 1
             if restoreTarget { self.model.pasteEngine.restoreTarget() }
             self.finishPasteHide()
@@ -183,9 +226,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             panel.animator().alphaValue = 0.85
         } completionHandler: { finish() }
     }
-    private func hidePanelForCapture() {
-        // Capture must not wait on an animation that a reopen can supersede.
+    private func hidePanelImmediately() {
+        // Captures and owned windows must not inherit a pending panel animation
+        // or its completion handler's focus restoration.
         panelPresented = false
+        cancelSuggestionResize()
+        model?.suggestionSessionActive = false
         presentationGeneration += 1
         panel.orderOut(nil)
         panelSurface.layer?.removeAllAnimations()
@@ -226,19 +272,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         return value
     }
     private func showSettings() {
-        hidePanel()
+        // This status-bar-level, nonactivating panel otherwise remains above
+        // the settings window until the hide animation completes.
+        hidePanelImmediately()
         if settingsWindow == nil { settingsWindow = window(title: "Pasteboard 设置", size: .init(width: 640, height: 592), view: SettingsView(model: model, mcp: mcpService)) }
+        if settingsWindow?.isMiniaturized == true { settingsWindow?.deminiaturize(nil) }
         NSApp.activate()
         settingsWindow?.makeKeyAndOrderFront(nil)
     }
     private func showEditor(_ item: ClipItem?) {
         editorWindow?.close()
+        model.retainHistory(item.map { [$0.id] } ?? [], for: "editor")
         editorWindow = window(title: item == nil ? "新建文本" : "编辑卡片", size: .init(width: 560, height: 420), view: EditorView(model: model, item: item))
         NSApp.activate()
         editorWindow?.makeKeyAndOrderFront(nil)
     }
     private func showPreview(_ item: ClipItem) {
         previewWindow?.close()
+        model.retainHistory([item.id], for: "preview")
         previewWindow = window(title: item.title.isEmpty ? item.kind.displayName : String(item.title.prefix(80)), size: .init(width: 660, height: 480), view: PreviewView(model: model, item: item))
         NSApp.activate()
         previewWindow?.makeKeyAndOrderFront(nil)
@@ -377,6 +428,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             if textEditing { return false }
             hidePanel(restoreTarget: true); return true
         }
+        if flags == .option, !textEditing,
+           let key = event.charactersIgnoringModifiers, let number = Int(key),
+           (1...5).contains(number), model.contextSuggestions.indices.contains(number - 1) {
+            if !event.isARepeat { model.applyContextSuggestion(model.contextSuggestions[number - 1]) }
+            return true
+        }
         if flags.contains(.command), let key = event.charactersIgnoringModifiers?.lowercased() {
             if key == "f" { model.isSearchVisible.toggle(); return true }
             if key == "," { showSettings(); return true }
@@ -414,6 +471,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     @objc private func openPanel() { showPanel() }
     private func showIntelligence(_ item: ClipItem) {
         intelligenceWindow?.close()
+        model.retainHistory([item.id], for: "intelligence")
         intelligenceWindow = window(title: "智能处理", size: .init(width: 620, height: 540), view: IntelligenceView(model: model, item: item))
         NSApp.activate()
         intelligenceWindow?.makeKeyAndOrderFront(nil)
@@ -464,6 +522,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         toolWindowPosition.save(toolWindow.frame.origin)
     }
     func windowWillClose(_ notification: Notification) {
+        if notification.object as? NSWindow === editorWindow { model.releaseHistory(for: "editor") }
+        if notification.object as? NSWindow === previewWindow { model.releaseHistory(for: "preview") }
+        if notification.object as? NSWindow === intelligenceWindow { model.releaseHistory(for: "intelligence") }
+        if notification.object as? NSWindow === suggestionResultWindow { model.releaseHistory(for: "suggestion") }
         if notification.object as? NSWindow === toolWindow { model.toolSessionActive = false; model.cancelToolOperation() }
     }
     private func matchesLegacyShortcut(_ key: UInt32, _ flags: UInt32, stack: Bool) -> Bool {
@@ -514,7 +576,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             guard let self else { return }
             defer { self.screenshotTask = nil }
             self.captureLogger.notice("capture requested")
-            self.hidePanelForCapture()
+            self.hidePanelImmediately()
             do {
                 try Task.checkCancellation()
                 let data = try await self.screenshotCoordinator.captureRegion()
@@ -592,7 +654,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
 #if DEBUG
 extension AppDelegate {
-    /// Exercises interruption cleanup with hidden test windows; no screen access or clipboard writes.
+    /// Adopts a synthetic fixture without launching production services or reading user history.
+    @MainActor
+    static func presentationPreview(model: AppModel, panel: ClipboardPanel) -> AppDelegate {
+        guard let container = panel.contentView as? PanelAnimationContainer else {
+            preconditionFailure("Presentation preview requires the production glass container")
+        }
+        let owner = AppDelegate()
+        owner.model = model
+        owner.panel = panel
+        owner.panelSurface = container.surface
+        owner.panelPresented = true
+        model.onSuggestionPanelChange = { [weak owner] _ in owner?.resizePanelForSuggestions() }
+        model.onClose = { [weak owner] in owner?.hidePanel() }
+        model.onSettings = { [weak owner] in owner?.showSettings() }
+        return owner
+    }
+
+    @objc func previewLightAppearance() { panel.appearance = NSAppearance(named: .aqua) }
+    @objc func previewDarkAppearance() { panel.appearance = NSAppearance(named: .darkAqua) }
+
+    @objc func previewShowSettings() { showSettings() }
+    @objc func previewHidePanel() { hidePanel() }
+    @objc func previewShowPanel() { showPanel(rememberTarget: false) }
+
+    /// Exercises the immediate handoff used by capture and settings with hidden test windows.
+    /// No screen access or clipboard writes.
     @MainActor
     static func checkCapturePanelHandoff() async throws -> Int {
         let owner = AppDelegate()
@@ -615,18 +702,30 @@ extension AppDelegate {
         }
         for _ in 0..<1000 where owner.pasteHideWaiters.count < 2 { await Task.yield() }
         guard owner.pasteHideWaiters.count == 2 else { throw SystemChecks.Failure(message: "Capture handoff fixture did not register waiters") }
-        owner.hidePanelForCapture()
+        owner.hidePanelImmediately()
         guard owner.pasteHideWaiters.isEmpty else { throw SystemChecks.Failure(message: "Capture handoff left interrupted hide waiters suspended") }
         guard !owner.panelPresented, !owner.panel.isVisible, owner.presentationGeneration == 3,
               owner.panel.alphaValue == 1, owner.panelSurface.frame.origin == .zero else {
             throw SystemChecks.Failure(message: "Capture handoff retained stale panel presentation")
         }
         await first.value; await second.value
-        owner.hidePanelForCapture()
+        owner.hidePanelImmediately()
         guard resumed == 2, owner.pasteHideWaiters.isEmpty else {
             throw SystemChecks.Failure(message: "Capture handoff resumed a waiter more than once")
         }
-        return 4
+        // An owned-window handoff must also invalidate a previous animated hide,
+        // so its completion cannot restore focus over the newly opened window.
+        owner.panelPresented = true
+        owner.panelSurface.frame.origin.y = -40
+        owner.panel.alphaValue = 0.9
+        let previousGeneration = owner.presentationGeneration
+        owner.hidePanelImmediately()
+        guard owner.presentationGeneration == previousGeneration + 1,
+              !owner.panelPresented, owner.panelSurface.frame.origin == .zero,
+              owner.panel.alphaValue == 1 else {
+            throw SystemChecks.Failure(message: "Owned-window handoff retained a stale animation or focus callback")
+        }
+        return 5
     }
 }
 #endif

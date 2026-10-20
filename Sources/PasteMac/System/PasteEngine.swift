@@ -85,6 +85,7 @@ final class NativePasteEnvironment: PasteDispatchEnvironment {
 
 @MainActor
 final class PasteEngine {
+    var onTargetChange: (() -> Void)?
     private(set) var target: PasteTarget?
     private(set) var lastIssue: PasteIssue?
     private let environment: PasteDispatchEnvironment
@@ -115,6 +116,7 @@ final class PasteEngine {
             value.focusedElement = PasteAccessibilityTransport.element(application, attribute: kAXFocusedUIElementAttribute)
             target = value
         }
+        onTargetChange?()
     }
     func restoreTarget() {
         guard let target, environment.isAlive(target) else { return }

@@ -7,11 +7,11 @@ import ServiceManagement
 
 @MainActor
 final class AppModel: ObservableObject {
-    @Published var snapshot: ClipboardSnapshot { didSet { cachedVisibleItems = nil; restoreSession() } }
-    @Published var queryString = "" { didSet { cachedVisibleItems = nil } }
-    @Published var selectedPinboardID: UUID? { didSet { cachedVisibleItems = nil } }
-    @Published var selectedIDs: Set<UUID> = []
-    @Published var filter = ClipFilter() { didSet { cachedVisibleItems = nil } }
+    @Published var snapshot: ClipboardSnapshot { didSet { trackStorageChanges(from: oldValue); cachedVisibleItems = nil; restoreSession(); scheduleContextSuggestions() } }
+    @Published var queryString = "" { didSet { cachedVisibleItems = nil; scheduleHistoryQuery(); scheduleContextSuggestions() } }
+    @Published var selectedPinboardID: UUID? { didSet { cachedVisibleItems = nil; scheduleHistoryQuery(); scheduleContextSuggestions() } }
+    @Published var selectedIDs: Set<UUID> = [] { didSet { scheduleContextSuggestions() } }
+    @Published var filter = ClipFilter() { didSet { cachedVisibleItems = nil; scheduleHistoryQuery(); scheduleContextSuggestions() } }
     @Published var isSearchVisible = false
     @Published var usesRecommendations = false { didSet { cachedVisibleItems = nil } }
     private var cachedVisibleItems: [ClipItem]?
@@ -27,11 +27,12 @@ final class AppModel: ObservableObject {
     @Published private(set) var stackReversed = false
     @Published private(set) var hotKeyDescription = "⇧⌘V"
     @Published private(set) var stackHotKeyDescription = "⇧⌘C"
-    @Published private(set) var isPasting = false
-    @Published private(set) var storageError: String?
+    @Published private(set) var isPasting = false { didSet { scheduleContextSuggestions() } }
+    @Published var storageError: String?
     @Published var toolConfiguration = CloudToolConfiguration() {
         didSet {
             if let data = try? JSONEncoder().encode(toolConfiguration) { toolDefaults.set(data, forKey: "cloudToolConfiguration.v1") }
+            scheduleContextSuggestions()
             let ocrChanged = !toolConfiguration.hasSameOCRSettings(as: oldValue)
             let translationChanged = !toolConfiguration.hasSameTranslationSettings(as: oldValue)
             if ocrChanged || translationChanged {
@@ -40,9 +41,39 @@ final class AppModel: ObservableObject {
             }
         }
     }
+    @Published var multiCardSummary: MultiCardContextSummary? { didSet { onSuggestionPanelChange?(contextSuggestionsPresented) } }
+    @Published var multiCardSummaryExpanded = false { didSet { onSuggestionPanelChange?(contextSuggestionsPresented) } }
+    @Published var contextSuggestionProgress: String?
+    var onSuggestionPreview: ((ContextSuggestionPreviewResult) -> Void)?
+    var multiCardSummaryCache: [(ContextSuggestionRequestKey, MultiCardContextSummary)] = []
+    @Published var contextSuggestions: [ContextSuggestion] = []
+    @Published var contextSuggestionsLoading = false {
+        didSet {
+            if contextSuggestionsLoading != oldValue { onSuggestionPanelChange?(contextSuggestionsPresented) }
+        }
+    }
+    @Published var contextSuggestionApplyingID: String?
+    @Published var contextSuggestionsError: String?
+    @Published var contextSuggestionsVisible = false
+    var suggestionSessionActive = false {
+        didSet {
+            if !suggestionSessionActive { dismissContextSuggestions() }
+            else if !oldValue { dismissedContextSuggestionKey = nil }
+        }
+    }
+    var onSuggestionPanelChange: ((Bool) -> Void)?
+    let suggestionOperations: ContextSuggestionOperations
+    let suggestionOperationsInjected: Bool
+    let suggestionDelayNanoseconds: UInt64
+    var contextSuggestionTask: Task<Void, Never>?
+    var contextSuggestionMutationInProgress = false
+    var contextSuggestionGeneration = UUID()
+    var contextSuggestionKey: ContextSuggestionRequestKey?
+    var dismissedContextSuggestionKey: ContextSuggestionRequestKey?
+    var contextSuggestionCache: [(ContextSuggestionRequestKey, [ContextSuggestion])] = []
     @Published var toolInputText = ""
     @Published var toolItemID: UUID?
-    @Published var toolBusy = false
+    @Published var toolBusy = false { didSet { scheduleContextSuggestions() } }
     @Published var toolStatus: String?
     @Published var toolError: String?
     @Published var toolPinned = false
@@ -68,9 +99,28 @@ final class AppModel: ObservableObject {
     let bridge: ClipboardBridge
     let repository: SnapshotRepository
     let storageDirectory: URL
-    private lazy var persistence = SnapshotPersistence(save: repository.save)
+    lazy var persistence = SnapshotPersistence(save: repository.save)
     private var captureTimer: Timer?
-    private var corruptStore = false
+    var corruptStore = false
+    var loadingHistoryWindow = false
+    var dirtyHistoryItems: [UUID: ClipItem] = [:]
+    var deletedHistoryIDs: Set<UUID> = []
+    @Published var historyManagementPreview: HistoryManagementPreview? { didSet { if historyManagementPreview == nil { onHistoryManagementClose?() } } }
+    var onHistoryManagementClose: (() -> Void)?
+    var onHistoryManagementPreview: ((HistoryManagementPreview) -> Void)?
+    @Published var historyResultIDs: [UUID] = [] { didSet { cachedVisibleItems = nil } }
+    var activeHistoryReferences: [String: Set<UUID>] = [:]
+    @Published var historyLoading = false
+    @Published var historyHasMore = false
+    @Published var historyTotalCount = 0
+    var historyPageOffset = 0
+    var historyQueryGeneration = UUID()
+    var historyQueryTask: Task<Void, Never>?
+    var knowledgeCoordinator: LocalKnowledgeCoordinator?
+    @Published var localIndexStatus: String?
+    @Published var automaticClassificationEnabled = true
+    @Published var suggestedCategories: [UUID: [UUID]] = [:]
+    var manualClassificationOverrides: [UUID: Set<UUID>] = [:]
     private var pendingPauseIndefinite = false
     private var lastSelection: UUID?
     var onClose: (() -> Void)?
@@ -86,7 +136,10 @@ final class AppModel: ObservableObject {
     var onShortcut: ((UInt32, UInt32) -> Bool)?
     var onStackShortcut: ((UInt32, UInt32) -> Bool)?
 
-    init(isDemo: Bool = false, storageDirectory: URL? = nil, bridge: ClipboardBridge? = nil, toolOperations: ToolOperations? = nil, toolDefaults: UserDefaults = .standard, pasteEngine: PasteEngine? = nil, autoTranslationDelayNanoseconds: UInt64 = 750_000_000) {
+    init(isDemo: Bool = false, storageDirectory: URL? = nil, bridge: ClipboardBridge? = nil, toolOperations: ToolOperations? = nil, toolDefaults: UserDefaults = .standard, pasteEngine: PasteEngine? = nil, autoTranslationDelayNanoseconds: UInt64 = 750_000_000, suggestionOperations: ContextSuggestionOperations? = nil, suggestionDelayNanoseconds: UInt64 = 250_000_000) {
+        self.suggestionOperations = suggestionOperations ?? .live()
+        self.suggestionOperationsInjected = suggestionOperations != nil
+        self.suggestionDelayNanoseconds = suggestionDelayNanoseconds
         self.autoTranslationDelayNanoseconds = autoTranslationDelayNanoseconds
         self.pasteEngine = pasteEngine ?? PasteEngine()
         self.isDemo = isDemo
@@ -100,7 +153,17 @@ final class AppModel: ObservableObject {
         if isDemo {
             snapshot = DemoData.snapshot()
         } else {
-            do { snapshot = SnapshotOperations.prune(try repository.load()) }
+            do {
+                var initial = try repository.loadMetadata()
+                let page = try repository.loadItems(limit: 50, offset: 0, query: "", pinboardID: nil, filter: .init(), includePayload: false)
+                let stacked = try repository.loadItems(ids: initial.session?.stackItemIDs ?? [])
+                var seen = Set<UUID>()
+                initial.items = (page + stacked).filter { seen.insert($0.id).inserted }
+                snapshot = initial
+                historyResultIDs = page.map(\.id)
+                historyTotalCount = try repository.itemCount()
+                historyHasMore = page.count == 50 && historyTotalCount > page.count
+            }
             catch {
                 snapshot = .init()
                 corruptStore = true
@@ -111,13 +174,19 @@ final class AppModel: ObservableObject {
         if let data = toolDefaults.data(forKey: "cloudToolConfiguration.v1"),
            let configuration = try? JSONDecoder().decode(CloudToolConfiguration.self, from: data) { toolConfiguration = configuration }
         selectFirstIfNeeded()
-        if !isDemo && !corruptStore { persist() }
+        if !isDemo && !corruptStore && storageDirectory == nil { startLocalKnowledge() }
     }
 
     var visibleItems: [ClipItem] {
         let target = usesRecommendations ? pasteEngine.target?.bundleID : nil
         if let cachedVisibleItems, cachedRecommendationTarget == target { return cachedVisibleItems }
-        let items = SnapshotOperations.filteredItems(in: snapshot, query: queryString, pinboardID: selectedPinboardID, filter: filter)
+        let items: [ClipItem]
+        if !isDemo {
+            let byID = Dictionary(snapshot.items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            items = historyResultIDs.compactMap { byID[$0] }
+        } else {
+            items = SnapshotOperations.filteredItems(in: snapshot, query: queryString, pinboardID: selectedPinboardID, filter: filter)
+        }
         let result = usesRecommendations && queryString.isEmpty && selectedPinboardID == nil
             ? TextTools.recommended(items, for: target, limit: 100) : items
         cachedRecommendationTarget = target
@@ -164,12 +233,8 @@ final class AppModel: ObservableObject {
         }
         do {
             guard let item = try bridge.capture(preferences: snapshot.preferences, paused: isPaused) else { return }
-            let captured = SnapshotOperations.capture(item, in: snapshot)
-            guard captured.items.contains(where: { $0.fingerprint == item.fingerprint }) else {
-                statusMessage = "历史容量已满，内容未保存。请取消部分收藏或提高历史记录上限。"
-                return
-            }
-            try repository.validate(captured)
+            let captured = captureInHistory(item)
+            try validateCurrentWindow(captured)
             snapshot = captured
             persist()
             if snapshot.preferences.soundEnabled { NSSound(named: "Pop")?.play() }
@@ -198,17 +263,23 @@ final class AppModel: ObservableObject {
     }
 
     func activateSelected(plainText: Bool = false) {
+        guard contextSuggestionApplyingID == nil else { return }
         selectFirstIfNeeded()
         paste(selectedItems, plainText: plainText)
     }
 
     func activate(_ item: ClipItem, plainText: Bool = false) {
-        select(item)
+        guard contextSuggestionApplyingID == nil else { return }
+        // Preserve the visible AI context (including multi-selection) until the panel exits.
+        // The clicked item is passed directly to paste; changing the selection would collapse it early.
+        if !contextSuggestionsPresented { select(item) }
         paste([item], plainText: plainText)
     }
 
-    private func paste(_ items: [ClipItem], plainText: Bool = false, completion: ((Bool) -> Void)? = nil) {
-        guard !isPasting else { return }
+    private func paste(_ requested: [ClipItem], plainText: Bool = false, completion: ((Bool) -> Void)? = nil) {
+        guard !isPasting, contextSuggestionApplyingID == nil else { return }
+        let items = materializedItems(requested)
+        guard !items.isEmpty else { completion?(false); return }
         pasteIssue = nil
         if snapshot.preferences.pasteToFrontmost { pasteEngine.enableAccessibilityChecks() }
         refreshDirectPastePermission()
@@ -249,9 +320,9 @@ final class AppModel: ObservableObject {
     }
 
     func copySelected(plainText: Bool = false) {
-        guard !isPasting else { return }
+        guard contextSuggestionApplyingID == nil, !isPasting else { return }
         selectFirstIfNeeded()
-        do { try bridge.write(selectedItems, plainText: plainText); statusMessage = "已复制" }
+        do { try bridge.write(materializedItems(selectedItems), plainText: plainText); statusMessage = "已复制" }
         catch { statusMessage = error.localizedDescription }
     }
 
@@ -269,20 +340,26 @@ final class AppModel: ObservableObject {
         if selectedPinboardID == id { selectedPinboardID = nil }
     }
     func pinSelection(to id: UUID) {
-        commit(SnapshotOperations.pin(itemIDs: selectedItems.map(\.id), to: id, in: snapshot), action: "收藏卡片")
+        let ids = selectedItems.map(\.id)
+        if commit(SnapshotOperations.pin(itemIDs: ids, to: id, in: snapshot), action: "收藏卡片") { recordManualClassification(ids: ids, categoryID: id, removing: false) }
     }
     func unpinSelection() {
         guard let id = selectedPinboardID else { return }
-        commit(SnapshotOperations.unpin(itemIDs: selectedItems.map(\.id), from: id, in: snapshot), action: "移出收藏夹")
+        let ids = selectedItems.map(\.id)
+        if commit(SnapshotOperations.unpin(itemIDs: ids, from: id, in: snapshot), action: "移出收藏夹") { recordManualClassification(ids: ids, categoryID: id, removing: true) }
     }
     func deleteSelected() {
         commit(SnapshotOperations.deleteItems(ids: Set(selectedItems.map(\.id)), in: snapshot), action: "删除卡片")
         selectFirstIfNeeded()
     }
     func clearHistory() {
-        let pinned = Set(snapshot.pinboards.flatMap(\.itemIDs))
-        let ids = Set(snapshot.items.map(\.id)).subtracting(pinned)
-        commit(SnapshotOperations.deleteItems(ids: ids, in: snapshot), action: "清除历史")
+        if isDemo {
+            let pinned = Set(snapshot.pinboards.flatMap(\.itemIDs))
+            _ = commit(SnapshotOperations.deleteItems(ids: Set(snapshot.items.map(\.id)).subtracting(pinned), in: snapshot), action: "清除历史")
+        } else {
+            do { try deleteHistoryBatch(ids: Set(repository.allItemIDs(unfiledOnly: true))) }
+            catch { statusMessage = "删除失败：\(error.localizedDescription)" }
+        }
         selectFirstIfNeeded()
     }
     func reorderPinboard(_ id: UUID, itemIDs: [UUID]) {
@@ -295,7 +372,7 @@ final class AppModel: ObservableObject {
         var next = snapshot
         next.preferences = value
         let pruned = SnapshotOperations.prune(next)
-        do { try repository.validate(pruned) }
+        do { try validateCurrentWindow(pruned) }
         catch { statusMessage = error.localizedDescription; return }
         snapshot = pruned
         persist()
@@ -317,10 +394,10 @@ final class AppModel: ObservableObject {
     }
     func openSettings() { onSettings?() }
     func newText() { onEditor?(nil) }
-    func edit(_ item: ClipItem) { onEditor?(item) }
+    func edit(_ item: ClipItem) { if let loaded = materializedItems([item]).first { onEditor?(loaded) } }
     func closeEditor() { onEditorClose?() }
-    func preview(_ item: ClipItem) { onPreview?(item) }
-    func intelligence(_ item: ClipItem) { onIntelligence?(item) }
+    func preview(_ item: ClipItem) { if let loaded = materializedItems([item]).first { onPreview?(loaded) } }
+    func intelligence(_ item: ClipItem) { if let loaded = materializedItems([item]).first { onIntelligence?(loaded) } }
     func showStack() {
         if stackItems.isEmpty { setStack(selectedItems) }
         onStack?()
@@ -393,14 +470,26 @@ final class AppModel: ObservableObject {
 
     @discardableResult
     func commit(_ value: ClipboardSnapshot, action: String) -> Bool {
-        let value = SnapshotOperations.normalizeSession(value)
+        let value = isDemo ? SnapshotOperations.normalizeSession(value) : value
         guard value != snapshot else { return true }
-        do { try repository.validate(value) }
+        do { try validateCurrentWindow(value) }
         catch { statusMessage = "修改未保存：\(error.localizedDescription)"; return false }
         let previous = snapshot
+        let changedIDs = Set(previous.items.map(\.id)).symmetricDifference(Set(value.items.map(\.id))).union(previous.items.compactMap { old in value.items.first(where: { $0.id == old.id }) != old ? old.id : nil })
+        var undoBefore = previous; undoBefore.items = materializedItems(previous.items.filter { changedIDs.contains($0.id) })
+        var undoAfter = value; undoAfter.items = value.items.filter { changedIDs.contains($0.id) }
         undoManager.registerUndo(withTarget: self) { target in
-            let restored = SnapshotOperations.undoChange(before: previous, after: value, in: target.snapshot)
-            target.commit(restored, action: action)
+            target.ensureHistoryItemsLoaded(changedIDs)
+            let restored = SnapshotOperations.undoChange(before: undoBefore, after: undoAfter, in: target.snapshot, preserveUnloadedReferences: !target.isDemo)
+            let priorBoards = target.snapshot.pinboards
+            if target.commit(restored, action: action) {
+                for board in priorBoards {
+                    let nextIDs = Set(restored.pinboards.first(where: { $0.id == board.id })?.itemIDs ?? [])
+                    let oldIDs = Set(board.itemIDs)
+                    target.recordManualClassification(ids: Array(oldIDs.subtracting(nextIDs)), categoryID: board.id, removing: true)
+                    target.recordManualClassification(ids: Array(nextIDs.subtracting(oldIDs)), categoryID: board.id, removing: false)
+                }
+            }
         }
         undoManager.setActionName(action)
         snapshot = value
@@ -409,26 +498,24 @@ final class AppModel: ObservableObject {
     }
 
     func recoverStorageForImport(_ imported: ClipboardSnapshot) throws {
-        guard corruptStore else { return }
-        try persistence.performSynchronous {
-            let file = storageDirectory.appendingPathComponent("clipboard.json")
-            if FileManager.default.fileExists(atPath: file.path) {
-                let backup = storageDirectory.appendingPathComponent("clipboard-damaged-\(UUID().uuidString).json")
-                try FileManager.default.copyItem(at: file, to: backup)
-                try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: backup.path)
-            }
-            try repository.save(imported)
-        }
-        corruptStore = false
-        storageError = nil
+        if corruptStore { try recoverCorruptHistory(imported) }
     }
 
     func persist() {
         guard !isDemo, !corruptStore else { return }
-        persistence.enqueue(snapshot) { [weak self] revision, error in
+        let upserts = Array(dirtyHistoryItems.values), deleted = deletedHistoryIDs
+        let metadata = snapshot
+        persistence.enqueue(snapshot, operation: { [repository] in
+            try repository.applyChanges(metadata: metadata, upserting: upserts, deleting: deleted)
+        }) { [weak self] revision, error in
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.persistence.isLatest(revision) else { return }
                 self.storageError = error.map { "保存失败，未保存的修改已暂存：\($0)" }
+                if error == nil {
+                    self.dirtyHistoryItems.removeAll(); self.deletedHistoryIDs.removeAll()
+                    self.indexSavedItems(upserts, deleted: deleted)
+                    self.scheduleHistoryQuery()
+                }
             }
         }
     }

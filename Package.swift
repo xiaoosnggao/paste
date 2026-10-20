@@ -7,9 +7,10 @@ let package = Package(
     products: [.executable(name: "Pasteboard", targets: ["PasteMac"]),
                .executable(name: "PasteboardMCP", targets: ["PasteCLI"])],
     targets: [
-        .target(name: "PasteCore"),
+        .systemLibrary(name: "CSQLite", pkgConfig: "sqlite3"),
+        .target(name: "PasteCore", dependencies: ["CSQLite"]),
         .executableTarget(name: "PasteCLI", dependencies: ["PasteCore"]),
-        .executableTarget(name: "PasteMac", dependencies: ["PasteCore"]),
+        .executableTarget(name: "PasteMac", dependencies: ["PasteCore", "CSQLite"]),
         .testTarget(name: "PasteCoreTests", dependencies: ["PasteCore"])
     ]
 )

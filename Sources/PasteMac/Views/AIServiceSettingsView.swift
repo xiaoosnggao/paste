@@ -14,6 +14,11 @@ struct AIServiceSettingsView: View {
 
     var body: some View {
         Group {
+            Section("场景建议") {
+                Toggle("选中卡片时生成建议", isOn: $model.toolConfiguration.contextSuggestionsEnabled)
+                Text("将所选文本、来源应用和粘贴目标发送至当前 AI 翻译服务；未指定时使用列表中首个已启用的文本服务。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("AI 服务") {
                 if model.toolConfiguration.aiServices.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
@@ -71,6 +76,7 @@ struct AIServiceSettingsView: View {
                         configuration.translationProvider = .system
                     }
                     model.toolConfiguration = configuration
+                    if keyChange != nil { model.invalidateContextSuggestionCache() }
                     let selectedForOCR = configuration.ocrAIServiceID == updated.id
                     let selectedForTranslation = configuration.translationAIServiceID == updated.id
                     if keyChange != nil, selectedForOCR || selectedForTranslation,

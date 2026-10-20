@@ -34,9 +34,9 @@ struct SettingsView: View {
                         Label(entry.rawValue, systemImage: entry.symbol)
                             .font(.system(size: 14)).frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, 14).padding(.vertical, 11)
-                            .background(page == entry ? Color.accentColor : Color.clear, in: RoundedRectangle(cornerRadius: 8))
-                            .foregroundStyle(page == entry ? .white : .primary)
-                    }.buttonStyle(.plain)
+                            .contentShape(Rectangle())
+                    }.buttonStyle(PanelControlStyle(selected: page == entry)).focusEffectDisabled()
+                        .accessibilityAddTraits(page == entry ? .isSelected : [])
                 }
                 Spacer()
                 Text("剪贴板历史管理").font(.caption).foregroundStyle(.secondary).padding(14)
@@ -88,15 +88,10 @@ struct SettingsView: View {
             Toggle("复制时播放音效", isOn: preference(\.soundEnabled))
         }
         Section("历史记录") {
-            Picker("保留期限", selection: preference(\.retentionDays)) {
-                Text("1 天").tag(Int?.some(1))
-                Text("1 周").tag(Int?.some(7))
-                Text("1 个月").tag(Int?.some(30))
-                Text("1 年").tag(Int?.some(365))
-                Text("永久").tag(Int?.none)
-            }
-            Picker("历史记录上限", selection: preference(\.maxHistoryItems)) {
-                ForEach([100, 500, 1000, 5000, 10000], id: \.self) { Text("\($0)").tag($0) }
+            LabeledContent("保存方式", value: "永久保留")
+            Toggle("自动分类新内容", isOn: Binding(get: { model.automaticClassificationEnabled }, set: { model.setAutomaticClassification($0) }))
+            if let status = model.localIndexStatus {
+                HStack { Text(status).font(.caption).foregroundStyle(.secondary); Spacer(); Button("重试", action: model.retryLocalKnowledge) }
             }
             Button("删除历史记录…", role: .destructive) { deleteConfirmation = true }
         }

@@ -12,6 +12,7 @@ final class SnapshotPersistence: @unchecked Sendable {
     private struct Pending {
         let revision: UInt64
         let snapshot: ClipboardSnapshot
+        let operation: (() throws -> Void)?
         let completion: (UInt64, String?) -> Void
     }
     private let condition = NSCondition()
@@ -25,12 +26,12 @@ final class SnapshotPersistence: @unchecked Sendable {
     init(save: @escaping (ClipboardSnapshot) throws -> Void) { self.save = save }
 
     @discardableResult
-    func enqueue(_ snapshot: ClipboardSnapshot, completion: @escaping (UInt64, String?) -> Void) -> UInt64 {
+    func enqueue(_ snapshot: ClipboardSnapshot, operation: (() throws -> Void)? = nil, completion: @escaping (UInt64, String?) -> Void) -> UInt64 {
         condition.lock()
         revision &+= 1
         let token = revision
         counters.submitted += 1
-        pending = Pending(revision: token, snapshot: snapshot, completion: completion)
+        pending = Pending(revision: token, snapshot: snapshot, operation: operation, completion: completion)
         counters.maximumPendingSnapshots = max(counters.maximumPendingSnapshots, 1)
         let start = !draining
         draining = true
@@ -61,7 +62,7 @@ final class SnapshotPersistence: @unchecked Sendable {
     private func drain() {
         while let work = takeNext() {
             let failure: String?
-            do { try save(work.snapshot); failure = nil }
+            do { if let operation = work.operation { try operation() } else { try save(work.snapshot) }; failure = nil }
             catch { failure = error.localizedDescription }
             condition.lock(); counters.completedWrites += 1; condition.unlock()
             work.completion(work.revision, failure)

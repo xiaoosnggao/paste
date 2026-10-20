@@ -63,6 +63,7 @@ struct CloudToolConfiguration: Codable, Equatable, Sendable {
     var openAITranslationEndpoint = "https://api.openai.com/v1/chat/completions"
     var openAITranslationModel = "gpt-4o-mini"
     var microsoftRegion = ""
+    var contextSuggestionsEnabled = true
     var aiServices: [AIServiceConfig] = []
     var translationAIServiceID: UUID? = nil
     var ocrAIServiceID: UUID? = nil
@@ -127,7 +128,7 @@ struct CloudToolConfiguration: Codable, Equatable, Sendable {
         case ocrProvider, translationProvider, ocrMode, zhipuModel, targetLanguage, sourceLanguage
         case tencentRegion, tencentAction, baiduOCRMode, openAIOCREndpoint, openAIOCRModel
         case openAITranslationEndpoint, openAITranslationModel, microsoftRegion
-        case aiServices, translationAIServiceID, ocrAIServiceID
+        case aiServices, translationAIServiceID, ocrAIServiceID, contextSuggestionsEnabled
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -147,6 +148,7 @@ struct CloudToolConfiguration: Codable, Equatable, Sendable {
         openAITranslationEndpoint = try c.decodeIfPresent(String.self, forKey: .openAITranslationEndpoint) ?? openAITranslationEndpoint
         openAITranslationModel = try c.decodeIfPresent(String.self, forKey: .openAITranslationModel) ?? openAITranslationModel
         microsoftRegion = try c.decodeIfPresent(String.self, forKey: .microsoftRegion) ?? microsoftRegion
+        contextSuggestionsEnabled = try c.decodeIfPresent(Bool.self, forKey: .contextSuggestionsEnabled) ?? true
         aiServices = try c.decodeIfPresent([AIServiceConfig].self, forKey: .aiServices) ?? []
         translationAIServiceID = try c.decodeIfPresent(UUID.self, forKey: .translationAIServiceID)
         ocrAIServiceID = try c.decodeIfPresent(UUID.self, forKey: .ocrAIServiceID)

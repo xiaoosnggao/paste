@@ -189,12 +189,14 @@ enum ToolWorkflowChecks {
         var recognizedCard = imageCard
         recognizedCard.enrichment = .init(ocr: .init(text: "Previous OCR", provider: "fixture"))
         saveRetry.snapshot.items = [recognizedCard]
-        saveRetry.snapshot.preferences.maxHistoryItems = 1
+        // An invalid preference fixture exercises an actual validation failure; history no longer has a count cap.
+        saveRetry.snapshot.preferences.ignoredBundleIDs = Array(repeating: "fixture.invalid", count: 1001)
         saveRetry.showToolItem(recognizedCard)
         saveRetry.toolInputText = "Edited source to preserve"
         saveRetry.translateToolInput()
         try check(saveRetry.toolError != nil && saveRetry.lastToolOperation == .inputTranslate,
                   "translation source save failure retained OCR-only retry intent")
+        saveRetry.snapshot.preferences.ignoredBundleIDs = []
         saveRetry.retryToolOperation(); try await finished(saveRetry)
         try check(saveRetry.toolInputText == "Edited source to preserve",
                   "retry after source save failure discarded edited source")
@@ -214,7 +216,7 @@ enum ToolWorkflowChecks {
         full.snapshot.preferences.maxHistoryItems = 1
         let originalID = full.addScreenshot(image, translateAfter: false)
         try await finished(full)
-        try check(full.snapshot.items.count == 1 && full.snapshot.items.first?.id == originalID && full.toolError != nil, "result evicted original when history was full")
+        try check(full.snapshot.items.count == 2 && full.snapshot.items.contains { $0.id == originalID } && full.toolError == nil, "legacy history limit prevented OCR result or evicted original")
         return count
     }
     private static func waiting(_ gate: ToolResponseGate) async throws {

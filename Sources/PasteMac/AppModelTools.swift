@@ -70,6 +70,8 @@ extension AppModel {
         return item.enrichment?.ocr?.text ?? item.text
     }
     func performTool(_ action: ToolAction) {
+        guard contextSuggestionApplyingID == nil else { return }
+        dismissContextSuggestions()
         guard !isPasting else { statusMessage = "正在粘贴，请稍后重试。"; return }
         onToolStart?()
         switch action {
@@ -102,7 +104,12 @@ extension AppModel {
     func showToolItem(_ item: ClipItem) {
         onToolStart?()
         cancelToolOperation()
-        guard let current = snapshot.items.first(where: { $0.id == item.id }) else { return }
+        guard let current = materializedItems([item]).first else { return }
+        if !isDemo {
+            loadingHistoryWindow = true
+            snapshot.items = snapshot.items.map { $0.id == current.id ? current : $0 }
+            loadingHistoryWindow = false
+        }
         toolItemID = current.id; toolInputText = current.enrichment?.ocr?.text ?? current.text
         lastToolOperation = current.kind == .image ? .screenshotTranslate : .inputTranslate
         toolStatus = nil; toolError = nil; onShowTools?()
@@ -117,6 +124,7 @@ extension AppModel {
         return stored.id
     }
     func recognizeItem(_ item: ClipItem, translateAfter: Bool = true) {
+        guard contextSuggestionApplyingID == nil else { return }
         showToolItem(item)
         guard let current = activeToolItem, let data = Self.imageData(current) else { toolError = "此卡片不包含图片。"; return }
         cancelToolOperation(); toolBusy = true; toolStatus = "正在识别文字…"; toolError = nil
@@ -165,6 +173,7 @@ extension AppModel {
         } else { translateToolInput() }
     }
     func translateToolInput() {
+        guard contextSuggestionApplyingID == nil else { return }
         cancelAutoTranslation()
         toolInputIsComposing = false
         guard !toolBusy else { return }
@@ -227,7 +236,7 @@ extension AppModel {
         let next = SnapshotOperations.capture(result, in: updated)
         guard next.items.contains(where: { $0.id == source.id }),
               next.items.contains(where: { $0.fingerprint == result.fingerprint && $0.derivation == result.derivation }) else {
-            toolError = "历史容量不足，结果未保存。请提高历史记录上限或清理记录后重试。原始内容已保留。"; return false
+            toolError = "无法保存处理结果，请重试。"; return false
         }
         guard commit(next, action: action) else { toolError = statusMessage ?? "结果卡片未保存。"; return false }
         return true
@@ -262,7 +271,7 @@ extension AppModel {
     }
     private func storeToolItem(_ item: ClipItem, action: String) -> ClipItem? {
         let next = SnapshotOperations.capture(item, in: snapshot)
-        guard let stored = next.items.first(where: { $0.fingerprint == item.fingerprint && $0.derivation == item.derivation }) else { toolError = "历史容量已满，内容未保存。"; return nil }
+        guard let stored = next.items.first(where: { $0.fingerprint == item.fingerprint && $0.derivation == item.derivation }) else { toolError = "无法保存内容，请重试。"; return nil }
         guard commit(next, action: action) else { toolError = statusMessage ?? "保存失败。"; return nil }
         select(stored)
         return stored

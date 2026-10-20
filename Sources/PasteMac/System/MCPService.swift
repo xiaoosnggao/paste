@@ -224,11 +224,17 @@ final class MCPService: ObservableObject {
         guard Set(arguments.keys).isSubset(of: allowed[name] ?? []) else { throw MCPFailure("Unknown argument") }
         func integer(_ key: String, default fallback: Int, maximum: Int) throws -> Int {
             guard let value = arguments[key] else { return fallback }
-            guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(), number.doubleValue.rounded() == number.doubleValue, number.doubleValue >= 0, number.doubleValue <= Double(maximum) else { throw MCPFailure("Invalid \(key)") }
+            guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(), number.doubleValue.rounded() == number.doubleValue, number.doubleValue >= 0, number.doubleValue < Double(Int.max), number.doubleValue <= Double(maximum) else { throw MCPFailure("Invalid \(key)") }
             return number.intValue
         }
         func item() throws -> ClipItem {
-            guard let id = arguments["id"] as? String, let uuid = UUID(uuidString: id), let clip = model.snapshot.items.first(where: { $0.id == uuid }) else { throw MCPFailure("Item not found") }
+            guard let id = arguments["id"] as? String, let uuid = UUID(uuidString: id), !model.deletedHistoryIDs.contains(uuid) else { throw MCPFailure("Item not found") }
+            if model.isDemo {
+                guard let clip = model.snapshot.items.first(where: { $0.id == uuid }) else { throw MCPFailure("Item not found") }
+                return clip
+            }
+            try model.synchronizeDurableHistory()
+            guard let clip = try model.repository.loadItems(ids: [uuid]).first else { throw MCPFailure("Item not found") }
             return clip
         }
         switch name {
@@ -236,11 +242,18 @@ final class MCPService: ObservableObject {
             guard arguments["query"] == nil || arguments["query"] is String else { throw MCPFailure("Invalid query") }
             let query = arguments["query"] as? String ?? ""
             guard query.count <= 500 else { throw MCPFailure("Query too long") }
-            let offset = try integer("offset", default: 0, maximum: 100_000), limit = try integer("limit", default: 20, maximum: 50)
+            let offset = try integer("offset", default: 0, maximum: Int.max), limit = try integer("limit", default: 20, maximum: 50)
             guard limit > 0 else { throw MCPFailure("Limit must be positive") }
-            let items = SnapshotOperations.filteredItems(in: model.snapshot, query: query, pinboardID: nil, filter: .init())
-            let page = items.dropFirst(offset).prefix(limit)
-            return ["items": page.map { ["id": $0.id.uuidString, "title": String($0.title.prefix(80)), "kind": $0.kind.rawValue, "preview": String($0.text.prefix(100))] }, "total": items.count, "nextOffset": offset + page.count < items.count ? offset + page.count : NSNull()] as [String: Any]
+            let page: [ClipItem], total: Int
+            if model.isDemo {
+                let items = SnapshotOperations.filteredItems(in: model.snapshot, query: query, pinboardID: nil, filter: .init())
+                page = Array(items.dropFirst(offset).prefix(limit)); total = items.count
+            } else {
+                try model.synchronizeDurableHistory()
+                page = try model.repository.loadItems(limit: limit, offset: offset, query: query, includePayload: false)
+                total = try model.repository.itemCount(query: query)
+            }
+            return ["items": page.map { ["id": $0.id.uuidString, "title": String($0.title.prefix(80)), "kind": $0.kind.rawValue, "preview": String($0.text.prefix(100))] }, "total": total, "nextOffset": offset < total && page.count < total - offset ? offset + page.count : NSNull()] as [String: Any]
         case "get_item":
             let clip = try item(), offset = try integer("offset", default: 0, maximum: 2_097_152), limit = try integer("limit", default: 2000, maximum: 4000)
             guard limit > 0 else { throw MCPFailure("Limit must be positive") }

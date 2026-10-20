@@ -39,7 +39,7 @@ final class SessionStateTests: XCTestCase {
         XCTAssertEqual(deleted.session?.stackItemIDs, [first.id])
         snapshot.preferences.maxHistoryItems = 1
         let pruned = SnapshotOperations.prune(snapshot)
-        XCTAssertEqual(pruned.session?.stackItemIDs, [first.id])
+        XCTAssertEqual(pruned.session?.stackItemIDs, [second.id, first.id])
     }
 
     func testUndoNeverResurrectsConsumedSessionEntries() {

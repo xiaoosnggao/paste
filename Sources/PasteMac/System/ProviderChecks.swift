@@ -25,7 +25,7 @@ enum ProviderChecks {
         protocolConfig.connectionProxyDictionary = [:]
         let session = URLSession(configuration: protocolConfig)
         defer { session.invalidateAndCancel(); ProviderFixtureProtocol.clear() }
-        let service = CloudToolsService(session: session) { _ in "fixture-key" }
+        let service = CloudToolsService(session: session, credentialLoader: { _ in "fixture-key" })
         var config = fresh
         let bytes = Data([0x89, 0x50, 0x4e, 0x47, 0x01])
         let tencent = try json(["Response": ["TextDetections": [["DetectedText": "中文"], ["DetectedText": "English"]]]])
@@ -99,7 +99,7 @@ enum ProviderChecks {
             do { _ = try CloudToolsService.parseProviderTranslation(try json([:]), provider: provider); throw ProviderCheckFailure(label: "malformed translation accepted") }
             catch is CloudToolsError { try check(true, "malformed translation rejected") }
         }
-        let missing = CloudToolsService(session: session) { _ in nil }
+        let missing = CloudToolsService(session: session, credentialLoader: { _ in nil })
         config = fresh; config.ocrProvider = .tencent
         do { _ = try await missing.recognize(image: bytes, configuration: config); throw ProviderCheckFailure(label: "missing Tencent key accepted") }
         catch CloudToolsError.missingCredential(.tencentSecretID) { try check(true, "missing credential type") }

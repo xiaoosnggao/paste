@@ -2,6 +2,12 @@ import Foundation
 import CryptoKit
 
 extension CloudToolsService {
+    /// Clipboard operations favor a short response over a hidden reasoning budget.
+    static func aiJSONRequest(service: AIServiceConfig, body: [String: Any], headers: [String: String]) throws -> URLRequest {
+        var payload = body
+        if service.vendor == .deepseek { payload["thinking"] = ["type": "disabled"] }
+        return try jsonRequest(service.endpoint.trimmingCharacters(in: .whitespacesAndNewlines), body: payload, headers: headers)
+    }
     static func jsonRequest(_ endpoint: String, body: Any, headers: [String: String] = [:]) throws -> URLRequest {
         var request = try baseRequest(endpoint)
         request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")

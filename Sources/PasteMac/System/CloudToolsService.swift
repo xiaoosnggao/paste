@@ -99,7 +99,7 @@ final class CloudToolsService: @unchecked Sendable {
             "max_tokens": 64,
             "messages": [["role": "user", "content": "Reply with exactly OK."]]
         ]
-        let request = try Self.jsonRequest(endpoint, body: body, headers: headers)
+        let request = try Self.aiJSONRequest(service: config, body: body, headers: headers)
         let data = try await perform(request)
         _ = try Self.parseTranslation(data, allowTruncation: true)
     }

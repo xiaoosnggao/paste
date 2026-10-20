@@ -88,8 +88,69 @@ enum SystemChecks {
         let secondaryScreen = NSRect(x: -1920, y: -200, width: 1920, height: 1080)
         let visible = PanelPresentation.visibleFrame(on: secondaryScreen)
         try check(visible.minY == secondaryScreen.minY + 8 && visible.minX == secondaryScreen.minX + 8, "panel does not anchor to full monitor bounds")
+        let expanded = PanelPresentation.visibleFrame(on: secondaryScreen, suggestionsVisible: true)
+        try check(expanded.minY == visible.minY && expanded.height == visible.height + PanelPresentation.suggestionExpansionHeight, "suggestions expansion shifted bottom anchor")
+        let summaryFrame = PanelPresentation.visibleFrame(on: secondaryScreen, suggestionsVisible: true, additionalHeight: 250)
+        for step in 0...10 {
+            let progress = CGFloat(step) / 10
+            let shrinking = PanelPresentation.interpolatedFrame(from: summaryFrame, to: visible, progress: progress)
+            try check(shrinking.minY == visible.minY && shrinking.minX == visible.minX && shrinking.width == visible.width,
+                      "summary collapse moved the monitor anchor")
+            try check(shrinking.height >= visible.height && shrinking.height <= summaryFrame.height,
+                      "summary collapse overshot its content bounds")
+        }
+        try check(PanelPresentation.interpolatedFrame(from: summaryFrame, to: visible, progress: 1) == visible,
+                  "summary collapse did not finish at its destination")
+        let animatedPanel = ClipboardPanel(contentRect: visible, styleMask: [.borderless], backing: .buffered, defer: false)
+        animatedPanel.isReleasedWhenClosed = false
+        let frameAnimator = PanelFrameAnimator()
+        frameAnimator.animate(animatedPanel, to: summaryFrame)
+        await Task.yield()
+        frameAnimator.cancel()
+        animatedPanel.setFrame(visible, display: false)
+        try await Task.sleep(nanoseconds: 35_000_000)
+        try check(animatedPanel.frame == visible, "cancelled suggestion resize overwrote a later panel frame")
+        frameAnimator.animate(animatedPanel, to: summaryFrame, reduceMotion: true)
+        try check(animatedPanel.frame == summaryFrame, "reduce motion did not resize immediately")
+        animatedPanel.close()
+        let shortScreen = NSRect(x: 0, y: 900, width: 600, height: 300)
+        try check(PanelPresentation.visibleFrame(on: shortScreen, suggestionsVisible: true).height <= shortScreen.height - 16, "suggestions expand outside monitor")
         let clipped = PanelGlassContainer.make(content: EmptyView(), frame: NSRect(origin: .zero, size: visible.size))
         try check(clipped.layer?.masksToBounds == true, "panel content can draw outside its animation window")
+        let solidContainer = PanelGlassContainer.make(content: EmptyView(), frame: NSRect(origin: .zero, size: visible.size), reduceTransparency: true) as! PanelAnimationContainer
+        let solidSurface = solidContainer.surface as! PanelGlassSurface
+        try check(solidSurface.material == .solid, "reduce transparency did not use an opaque surface")
+        let nativeContainer = PanelGlassContainer.make(content: EmptyView(), frame: NSRect(origin: .zero, size: visible.size), reduceTransparency: false) as! PanelAnimationContainer
+        let nativeSurface = nativeContainer.surface as! PanelGlassSurface
+        if #available(macOS 26.0, *) {
+            try check(nativeSurface.material == .liquidGlass, "native Liquid Glass surface missing")
+            let glass = nativeSurface.subviews.first as? NSGlassEffectView
+            try check(glass?.contentView != nil && glass?.tintColor != nil, "glass lost its hosted content or graphite tint")
+            if #available(macOS 27.0, *) { try check(glass?.effectIsInteractive == false, "window glass must not flash when clicking empty space") }
+        } else {
+            try check(nativeSurface.material == .visualEffect, "older macOS blur fallback missing")
+        }
+        let nativeBackground = nativeSurface.subviews.first
+        let solidBackground = solidSurface.subviews.first
+        for appearanceName in [NSAppearance.Name.aqua, .darkAqua, .aqua] {
+            nativeContainer.appearance = NSAppearance(named: appearanceName)
+            solidContainer.appearance = NSAppearance(named: appearanceName)
+            nativeSurface.viewDidChangeEffectiveAppearance()
+            solidSurface.viewDidChangeEffectiveAppearance()
+            let dark = appearanceName == .darkAqua
+            let solidColor = solidBackground?.layer?.backgroundColor.flatMap { NSColor(cgColor: $0)?.usingColorSpace(.sRGB) }
+            try check(abs((solidColor?.redComponent ?? -1) - (dark ? 32.0 / 255 : 236.0 / 255)) < 0.001,
+                      "solid fallback did not track the current appearance")
+            try check(nativeSurface.subviews.first === nativeBackground && solidSurface.subviews.first === solidBackground,
+                      "appearance change rebuilt the animated material surface")
+            if #available(macOS 26.0, *), let glass = nativeBackground as? NSGlassEffectView {
+                let tint = glass.tintColor?.usingColorSpace(.sRGB)
+                try check(abs((tint?.redComponent ?? -1) - (dark ? 0.10 : 188.0 / 255)) < 0.001,
+                          "Liquid Glass tint did not track the current appearance")
+                try check(dark ? (tint?.alphaComponent ?? 0) >= 0.75 : (tint?.alphaComponent ?? 1) < 0.4,
+                          "glass tint lost dark contrast protection or light translucency")
+            }
+        }
         let upper = NSRect(x: 0, y: 1080, width: 1920, height: 1080)
         let lower = NSRect(x: 0, y: 0, width: 1920, height: 1080)
         let upperWindow = PanelPresentation.visibleFrame(on: upper)
@@ -209,7 +270,7 @@ enum SystemChecks {
         try recovering.recoverStorageForImport(restored)
         let recoverySnapshot = try SnapshotRepository(directory: damagedDirectory).load()
         try check(recoverySnapshot == restored, "valid backup did not recover corrupt persistence")
-        try check(try FileManager.default.contentsOfDirectory(atPath: damagedDirectory.path).contains { $0.hasPrefix("clipboard-damaged-") }, "damaged source was not preserved")
+        try check(try Data(contentsOf: damagedDirectory.appendingPathComponent("clipboard.json")) == Data("broken snapshot".utf8) && FileManager.default.fileExists(atPath: damagedDirectory.appendingPathComponent("Damaged Store Recovery").path), "damaged source was not preserved")
         model.queryString = ""
         let attributed = NSAttributedString(string: "rich saved", attributes: [.font: NSFont.boldSystemFont(ofSize: 17), .underlineStyle: NSUnderlineStyle.single.rawValue])
         try check(model.saveRichText(attributed, title: "Formatted", item: nil), "formatted editor save failed")
@@ -230,7 +291,7 @@ enum SystemChecks {
         }
         let full = ClipItem(text: "", kind: .image, representations: [.init(type: "public.png", data: Data(repeating: 0, count: 60 * 1024 * 1024))])
         model.snapshot = .init(items: [full], pinboards: [Pinboard(name: "Full", itemIDs: [full.id])])
-        try check(!model.saveText("keep my input", title: "", item: nil), "capacity pruning silently closed the editor")
+        try check(model.saveText("keep my input", title: "", item: nil) && model.snapshot.items.contains(where: { $0.id == full.id }), "permanent history dropped existing content or rejected editor input")
         let engine = PasteEngine(trackApplications: false)
         let dispatched = await engine.dispatchPaste(closePanel: {})
         try check(!dispatched, "paste dispatched without a valid target")
@@ -246,6 +307,14 @@ enum SystemChecks {
         count += try MenuShortcut.checkPresentation()
         count += try ToolShortcutChecks.run()
         count += try await CloudToolsChecks.run()
+        count += try await LocalKnowledgeChecks.run()
+        count += try await LocalKnowledgeAcceptanceChecks.run()
+        count += try await AppModelHistoryChecks.run()
+        count += try await KnowledgeRegressionChecks.run()
+        count += try HorizontalScrollRoutingChecks.run()
+        count += try PanelPaletteChecks.run()
+        count += try await ContextSuggestionsChecks.run()
+        count += try await ContextSuggestionModelChecks.run()
         count += try await ToolWorkflowChecks.run()
         count += try ToolSourceEditor.runEditorChecks()
         count += try await AutoTranslationChecks.run()

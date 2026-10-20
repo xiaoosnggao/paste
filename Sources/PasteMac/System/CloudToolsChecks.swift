@@ -114,7 +114,7 @@ enum CloudToolsChecks {
         // MARK: - AI Services Checks
         let testServiceID = UUID()
         let dsService = AIServiceConfig(id: testServiceID, name: "DeepSeek", vendor: .deepseek)
-        try check(dsService.translationModel == "deepseek-chat", "DeepSeek default translation model")
+        try check(dsService.translationModel == "deepseek-flash", "DeepSeek default translation model")
         try check(dsService.endpoint == "https://api.deepseek.com/v1/chat/completions", "DeepSeek default endpoint")
         try check(dsService.vendor.apiKeyHelpURL != nil, "DeepSeek apiKeyHelpURL present")
 
@@ -128,11 +128,11 @@ enum CloudToolsChecks {
         var paddedEditor = dsService
         paddedEditor.name = "  Translation \n"
         paddedEditor.endpoint = "  https://api.deepseek.com/v1/chat/completions \n"
-        paddedEditor.translationModel = " deepseek-chat "
+        paddedEditor.translationModel = " deepseek-flash "
         paddedEditor.ocrModel = "  "
         let cleanedEditor = try AIServiceEditorSheet.validatedService(paddedEditor)
         try check(cleanedEditor.name == "Translation" && cleanedEditor.endpoint == dsService.endpoint
-                  && cleanedEditor.translationModel == "deepseek-chat" && cleanedEditor.ocrModel.isEmpty,
+                  && cleanedEditor.translationModel == "deepseek-flash" && cleanedEditor.ocrModel.isEmpty,
                   "AI service editor trims names endpoint and model fields")
         func rejectedEditor(_ input: AIServiceConfig, _ label: String) throws {
             do { _ = try AIServiceEditorSheet.validatedService(input) }
@@ -160,7 +160,7 @@ enum CloudToolsChecks {
         try check(decodedConfig.aiServices.count == 2, "AI services count preserved")
         try check(decodedConfig.translationAIServiceID == testServiceID, "translationAIServiceID preserved")
         try check(decodedConfig.ocrAIServiceID == oaiService.id, "ocrAIServiceID preserved")
-        try check(decodedConfig.translationProviderTitle == "DeepSeek · deepseek-chat", "translationProviderTitle format")
+        try check(decodedConfig.translationProviderTitle == "DeepSeek · deepseek-flash", "translationProviderTitle format")
         try check(decodedConfig.ocrProviderTitle == "OpenAI · gpt-4o", "ocrProviderTitle format")
 
         // Deterministic credential injection: fixtures never read or write the user's Keychain.
@@ -182,17 +182,18 @@ enum CloudToolsChecks {
         try await failure(.invalidConfiguration) { _ = try CloudToolsService.baseRequest("http://example.com/v1/chat/completions") }
 
         // AI Translation request test
-        try fixture(200, ["model": "deepseek-chat", "choices": [["finish_reason": "stop", "message": ["content": "这是大模型翻译结果"]]]])
+        try fixture(200, ["model": "deepseek-flash", "choices": [["finish_reason": "stop", "message": ["content": "这是大模型翻译结果"]]]])
         let aiTransResult = try await aiService.translate(text: "This is test text", configuration: aiToolConfig)
         try check(aiTransResult.text == "这是大模型翻译结果", "AI translation result text")
-        try check(aiTransResult.provider == "DeepSeek (deepseek-chat)", "AI translation provider label")
+        try check(aiTransResult.provider == "DeepSeek (deepseek-flash)", "AI translation provider label")
 
         let aiTransReq = CloudFixtureProtocol.lastRequest()
         try check(aiTransReq?.url?.host == "api.deepseek.com", "AI translation host route")
         try check(aiTransReq?.value(forHTTPHeaderField: "Authorization") == "Bearer sk-ai-mock-key", "AI translation Authorization header")
         let aiTransBody = try CloudFixtureProtocol.lastBody().flatMap { try JSONSerialization.jsonObject(with: $0) } as? [String: Any]
-        try check(aiTransBody?["model"] as? String == "deepseek-chat", "AI translation body model")
+        try check(aiTransBody?["model"] as? String == "deepseek-flash", "AI translation body model")
         try check(aiTransBody?["temperature"] == nil, "compatible AI requests omit optional temperature")
+        try check((aiTransBody?["thinking"] as? [String: String])?["type"] == "disabled", "DeepSeek clipboard translation disables thinking")
 
         // AI OCR request test
 
@@ -230,11 +231,11 @@ enum CloudToolsChecks {
 
 
         // Test testAIService method
-        try fixture(200, ["model": "deepseek-chat", "choices": [["finish_reason": "stop", "message": ["content": "OK"]]]])
+        try fixture(200, ["model": "deepseek-flash", "choices": [["finish_reason": "stop", "message": ["content": "OK"]]]])
         try await service.testAIService(config: dsService, key: "sk-test-key")
         try check(true, "testAIService completed successfully")
 
-        try fixture(200, ["model": "deepseek-chat", "choices": [["finish_reason": "length", "message": ["content": "OK"]]]])
+        try fixture(200, ["model": "deepseek-flash", "choices": [["finish_reason": "length", "message": ["content": "OK"]]]])
         try await aiService.testAIService(config: dsService, key: "sk-test-key")
         try check(true, "connection probe accepts valid truncated completion")
         try await failure(.invalidCredential) { try await aiService.testAIService(config: dsService, key: "key\ninvalid") }

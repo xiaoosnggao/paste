@@ -18,24 +18,8 @@ public enum SnapshotOperations {
         return prune(result)
     }
     public static func prune(_ snapshot: ClipboardSnapshot, now: Date = Date()) -> ClipboardSnapshot {
-        var result = snapshot
-        let pinned = Set(snapshot.pinboards.flatMap(\.itemIDs))
-        let cutoff = snapshot.preferences.retentionDays.map { now.addingTimeInterval(-Double(max(0, $0)) * 86400) }
-        var retainedHistory = 0
-        var retainedBytes = 0
-        let pinnedBytes = snapshot.items.filter { pinned.contains($0.id) }.reduce(0) { $0 + payloadByteCount($1) }
-        let historyByteLimit = min(48 * 1024 * 1024, max(0, 60 * 1024 * 1024 - pinnedBytes))
-        result.items = snapshot.items.filter { item in
-            if pinned.contains(item.id) { return true }
-            if let cutoff, item.lastCopiedAt < cutoff { return false }
-            guard retainedHistory < max(0, snapshot.preferences.maxHistoryItems) else { return false }
-            let byteCount = payloadByteCount(item)
-            guard byteCount <= historyByteLimit - retainedBytes else { return false }
-            retainedBytes += byteCount
-            retainedHistory += 1
-            return true
-        }
-        return normalizeSession(result, now: now)
+        // Legacy retention preferences never remove captured content. Only explicit deletion does.
+        normalizeSession(snapshot, now: now)
     }
     /// Keeps session references valid without restoring already consumed queue entries.
     public static func normalizeSession(_ snapshot: ClipboardSnapshot, now: Date = Date()) -> ClipboardSnapshot {
@@ -59,7 +43,13 @@ public enum SnapshotOperations {
         return candidates.filter { item in
             if let kind = filter.kind, item.kind != kind { return false }
             if let source = filter.sourceBundleID, item.sourceBundleID != source { return false }
+            if let source = filter.sourceName {
+                let aliases = ["微信": "wechat", "飞书": "lark", "VS Code": "code", "Chrome": "chrome"]
+                let alias = aliases[source] ?? source
+                guard [item.sourceName, item.sourceBundleID].contains(where: { $0.localizedCaseInsensitiveContains(source) || $0.localizedCaseInsensitiveContains(alias) }) else { return false }
+            }
             if let since = filter.since, item.lastCopiedAt < since { return false }
+            if let until = filter.until, item.lastCopiedAt >= until { return false }
             return term.isEmpty || [item.title, item.text, item.sourceName, item.enrichment?.ocr?.text ?? "", item.enrichment?.translation?.translatedText ?? "", item.enrichment?.translation?.sourceText ?? ""].joined(separator: "\n").range(of: term, options: [.caseInsensitive, .diacriticInsensitive]) != nil || item.filePaths.contains { $0.range(of: term, options: .caseInsensitive) != nil }
         }
     }
@@ -93,7 +83,7 @@ public enum SnapshotOperations {
         var result = snapshot; if let index = result.items.firstIndex(where: { $0.id == item.id }) { result.items[index] = item }; return result
     }
     /// Reverses a user operation against current state, retaining later clipboard captures.
-    public static func undoChange(before: ClipboardSnapshot, after: ClipboardSnapshot, in current: ClipboardSnapshot) -> ClipboardSnapshot {
+    public static func undoChange(before: ClipboardSnapshot, after: ClipboardSnapshot, in current: ClipboardSnapshot, preserveUnloadedReferences: Bool = false) -> ClipboardSnapshot {
         var result = current
         result.items = inverseEntries(before: before.items, after: after.items, current: current.items) { old, changed, live in
             var item = live
@@ -124,11 +114,11 @@ public enum SnapshotOperations {
             board.itemIDs = inverseMembership(before: old.itemIDs, after: changed.itemIDs, current: live.itemIDs)
             return board
         }.map { board in
-            var value = board; value.itemIDs = value.itemIDs.filter { validIDs.contains($0) }; return value
+            var value = board; if !preserveUnloadedReferences { value.itemIDs = value.itemIDs.filter { validIDs.contains($0) } }; return value
         }
         result.pinboards = inverseOrder(before: before.pinboards, after: after.pinboards, current: result.pinboards)
         if before.preferences != after.preferences && current.preferences == after.preferences { result.preferences = before.preferences }
-        return normalizeSession(result)
+        return preserveUnloadedReferences ? result : normalizeSession(result)
     }
     private static func revert<Value, Field: Equatable>(_ key: WritableKeyPath<Value, Field>, before: Value, after: Value, value: inout Value) {
         if before[keyPath: key] != after[keyPath: key] && value[keyPath: key] == after[keyPath: key] { value[keyPath: key] = before[keyPath: key] }
@@ -166,10 +156,6 @@ public enum SnapshotOperations {
             result = result.map { common.contains($0) ? (ordered.next() ?? $0) : $0 }
         }
         return result
-    }
-
-    private static func payloadByteCount(_ item: ClipItem) -> Int {
-        item.text.utf8.count + item.title.utf8.count + item.sourceBundleID.utf8.count + item.sourceName.utf8.count + item.filePaths.reduce(0) { $0 + $1.utf8.count } + (item.enrichment?.payloadByteCount ?? 0) + (item.representations + (item.originalRepresentations ?? [])).reduce(0) { $0 + $1.data.count + $1.type.utf8.count }
     }
 
     private static func inverseOrder<Entry: Identifiable>(before: [Entry], after: [Entry], current: [Entry]) -> [Entry] where Entry.ID == UUID {

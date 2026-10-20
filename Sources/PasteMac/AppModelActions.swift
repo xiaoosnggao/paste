@@ -21,19 +21,21 @@ extension AppModel {
     private func saveEditedText(_ text: String, title: String, item: ClipItem?, representations: [PasteboardRepresentation]) -> Bool {
         guard !text.isEmpty, text.utf8.count <= 2 * 1024 * 1024 else { statusMessage = "文本不能为空，且不能超过 2 MB。"; return false }
         let kind = ContentClassifier.classify(text: text)
-        if let item, !snapshot.items.contains(where: { $0.id == item.id }) {
-            statusMessage = "此卡片已删除或过期，请将编辑内容另存为新卡片。"
-            return false
-        }
-        let value = ClipItem(id: item?.id ?? UUID(), createdAt: item?.createdAt ?? Date(), lastCopiedAt: Date(),
+        let existing: ClipItem?
+        if let item {
+            guard !deletedHistoryIDs.contains(item.id), let hydrated = materializedItems([item]).first else {
+                statusMessage = "此卡片已删除，请将内容另存为新卡片。"
+                return false
+            }
+            existing = hydrated
+        } else { existing = nil }
+        let value = ClipItem(id: existing?.id ?? UUID(), createdAt: existing?.createdAt ?? Date(), lastCopiedAt: Date(),
                              title: title.isEmpty ? String(text.prefix(160)) : String(title.prefix(160)),
                              text: text, kind: kind, sourceBundleID: Bundle.main.bundleIdentifier ?? "com.gaoxs.pasteboard",
-                             sourceName: "Pasteboard", representations: representations)
-        var next = item != nil ? SnapshotOperations.replaceItem(value, in: snapshot) : SnapshotOperations.capture(value, in: snapshot)
-        guard next.items.contains(where: { $0.id == value.id || $0.fingerprint == value.fingerprint }) else {
-            statusMessage = "收藏已占满历史容量，请取消部分收藏或提高历史记录上限。编辑内容已保留。"
-            return false
-        }
+                             sourceName: "Pasteboard", representations: representations, enrichment: existing?.enrichment, derivation: existing?.derivation)
+        var base = snapshot
+        if let existing, !base.items.contains(where: { $0.id == existing.id }) { base.items.append(existing) }
+        var next = existing != nil ? SnapshotOperations.replaceItem(value, in: base) : captureInHistory(value)
         if item == nil, let board = selectedPinboardID,
            let stored = next.items.first(where: { $0.id == value.id || $0.fingerprint == value.fingerprint }) {
             next = SnapshotOperations.pin(itemIDs: [stored.id], to: board, in: next)
@@ -55,7 +57,7 @@ extension AppModel {
 
     func rotateImage(_ item: ClipItem, clockwise: Bool) {
         guard processingImageIDs.isEmpty else { statusMessage = "正在处理图片，请等待完成或取消操作。"; return }
-        guard let current = snapshot.items.first(where: { $0.id == item.id }),
+        guard !deletedHistoryIDs.contains(item.id), let current = materializedItems([item]).first,
               let data = Self.imageData(current) else { statusMessage = "无法读取图片，卡片可能已删除。"; return }
         processingImageIDs.insert(current.id)
         let work = Task.detached(priority: .utility) { try ImageProcessing.rotate(data, clockwise: clockwise) }
@@ -64,7 +66,7 @@ extension AppModel {
             do {
                 let output = try await withTaskCancellationHandler(operation: { try await work.value }, onCancel: { work.cancel() })
                 try Task.checkCancellation()
-                guard let self, self.snapshot.items.first(where: { $0.id == current.id }) == current else { return }
+                guard let self, !self.deletedHistoryIDs.contains(current.id), self.materializedItems([current]).first == current else { return }
                 var rotated = current
                 rotated.representations = [.init(type: NSPasteboard.PasteboardType.png.rawValue, data: output)]
                 rotated.lastCopiedAt = Date()
@@ -105,7 +107,11 @@ extension AppModel {
         panel.allowedContentTypes = [.json]
         panel.message = "备份包含文字和原始格式。文件卡片仅备份路径，不包含文件本身。"
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        do { try repository.export(snapshot, to: url); statusMessage = "备份已导出" }
+        do {
+            try synchronizeDurableHistory()
+            try repository.export(isDemo ? snapshot : repository.load(), to: url)
+            statusMessage = "备份已导出"
+        }
         catch { statusMessage = "导出失败：\(error.localizedDescription)" }
     }
 
@@ -123,13 +129,64 @@ extension AppModel {
             alert.addButton(withTitle: "导入")
             alert.addButton(withTitle: "取消")
             guard alert.runModal() == .alertFirstButtonReturn else { return }
-            let pruned = SnapshotOperations.prune(imported)
-            try recoverStorageForImport(pruned)
-            guard commit(pruned, action: "导入备份") else { return }
+            try replaceHistoryFromBackup(imported, action: "导入备份")
             selectedPinboardID = nil
             selectedIDs = []
             selectFirstIfNeeded()
             statusMessage = "备份已导入"
         } catch { statusMessage = "导入失败，当前数据未改变：\(error.localizedDescription)" }
+    }
+    /// Explicit exports and MCP reads include all accepted, not-yet-completed writes.
+    func synchronizeDurableHistory() throws {
+        guard !isDemo else { return }
+        try persistence.performSynchronous {
+            try repository.applyChanges(metadata: snapshot, upserting: Array(dirtyHistoryItems.values), deleting: deletedHistoryIDs)
+        }
+    }
+
+    private func replaceHistoryFromBackup(_ imported: ClipboardSnapshot, action: String) throws {
+        if isDemo { _ = commit(imported, action: action); return }
+        if corruptStore { try recoverCorruptHistory(imported); return }
+        try synchronizeDurableHistory()
+        // Keep import undo on disk instead of retaining an unbounded snapshot in memory.
+        let recoveryDirectory = storageDirectory.appendingPathComponent("Import Recovery", isDirectory: true)
+        try FileManager.default.createDirectory(at: recoveryDirectory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let recovery = recoveryDirectory.appendingPathComponent("before-import-\(UUID().uuidString).json")
+        let applied = recoveryDirectory.appendingPathComponent("after-import-\(UUID().uuidString).json")
+        try repository.export(repository.load(), to: recovery)
+        try repository.export(imported, to: applied)
+        try persistence.performSynchronous { try repository.save(imported) }
+        finishHistoryReplacement()
+        loadingHistoryWindow = true
+        snapshot = try repository.loadMetadata()
+        dirtyHistoryItems.removeAll(); deletedHistoryIDs.removeAll()
+        loadingHistoryWindow = false
+        selectedIDs = []; selectedPinboardID = nil
+        installHistoryPage(try repository.loadItems(limit: 50, includePayload: false), offset: 0, total: try repository.itemCount())
+        undoManager.registerUndo(withTarget: self) { target in
+            do {
+                try target.synchronizeDurableHistory()
+                let restored = SnapshotOperations.undoChange(before: try target.repository.importSnapshot(from: recovery),
+                                                            after: try target.repository.importSnapshot(from: applied),
+                                                            in: try target.repository.load())
+                try target.replaceHistoryFromBackup(restored, action: action)
+            }
+            catch { target.statusMessage = "恢复失败：\(error.localizedDescription)" }
+        }
+        undoManager.setActionName(action)
+        scheduleHistoryQuery()
+    }
+
+    func recoverCorruptHistory(_ imported: ClipboardSnapshot) throws {
+        try persistence.performSynchronous { try repository.recoverCorruptStore(with: imported) }
+        finishHistoryReplacement()
+        loadingHistoryWindow = true
+        snapshot = try repository.loadMetadata()
+        dirtyHistoryItems.removeAll(); deletedHistoryIDs.removeAll()
+        loadingHistoryWindow = false
+        selectedIDs = []; selectedPinboardID = nil
+        installHistoryPage(try repository.loadItems(limit: 50, includePayload: false), offset: 0, total: try repository.itemCount())
+        undoManager.removeAllActions()
+        scheduleHistoryQuery()
     }
 }
