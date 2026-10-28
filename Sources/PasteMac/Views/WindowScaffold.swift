@@ -30,6 +30,8 @@ struct WindowScaffold<Accessory: View, Content: View, Footer: View>: View {
 
     let title: String
     var subtitle: String?
+    /// Quiet line centered in a window's title bar, between the traffic lights and the toolbar.
+    var caption: String?
     var chrome: Chrome
     /// Content scrolls when the window or sheet is too short for it.
     var scrolls: Bool
@@ -38,10 +40,11 @@ struct WindowScaffold<Accessory: View, Content: View, Footer: View>: View {
     let footer: Footer
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
-    init(_ title: String, subtitle: String? = nil, chrome: Chrome = .window, scrolls: Bool = false,
+    init(_ title: String, subtitle: String? = nil, caption: String? = nil, chrome: Chrome = .window, scrolls: Bool = false,
          @ViewBuilder accessory: () -> Accessory, @ViewBuilder content: () -> Content, @ViewBuilder footer: () -> Footer) {
         self.title = title
         self.subtitle = subtitle
+        self.caption = caption
         self.chrome = chrome
         self.scrolls = scrolls
         self.accessory = accessory()
@@ -98,6 +101,13 @@ struct WindowScaffold<Accessory: View, Content: View, Footer: View>: View {
         .padding(.leading, chrome == .window ? WindowMetrics.trafficLightInset : WindowMetrics.contentPadding)
         .padding(.trailing, chrome == .window ? DesignTokens.Space.md : WindowMetrics.contentPadding)
         .frame(height: WindowMetrics.titleBarHeight)
+        .overlay {
+            if chrome == .window, let caption, !caption.isEmpty {
+                Text(caption).font(.scaled(.caption, weight: .medium)).foregroundStyle(PanelPalette.secondaryText)
+                    .lineLimit(1).truncationMode(.middle).help(caption)
+                    .padding(.horizontal, 140).allowsHitTesting(false)
+            }
+        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(title)
     }

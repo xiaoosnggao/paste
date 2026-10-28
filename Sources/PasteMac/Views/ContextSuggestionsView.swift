@@ -16,7 +16,6 @@ struct PreviewSuggestionsSection: View {
                         .disabled(model.contextSuggestionsLoading || model.contextSuggestionApplyingID != nil)
                 }
             }
-            Text(subtitle).font(.scaled(.caption)).foregroundStyle(PanelPalette.secondaryText).lineLimit(1).truncationMode(.middle)
             if model.suggestionStripShowsHint {
                 Button("显示建议", action: model.retryContextSuggestions).buttonStyle(.plain).font(.scaled(.caption)).foregroundStyle(PanelPalette.accent)
             } else {
@@ -59,12 +58,6 @@ struct PreviewSuggestionsSection: View {
         .animation(.easeOut(duration: 0.16), value: model.displayedSuggestions.map(\.id))
     }
 
-    private var subtitle: String {
-        let target = model.pasteEngine.target?.name ?? "复制到剪贴板"
-        if model.selectedIDs.count > 1 { return "已选 \(model.selectedIDs.count) 项 → \(target)" }
-        let source = model.selectedItems.first?.sourceName ?? ""
-        return "\(source.isEmpty ? "未知来源" : source) → \(target)"
-    }
 
     @ViewBuilder private var multiSummary: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -119,5 +112,15 @@ private struct RegenerateButton: View {
         .onHover { hovering = $0 }
         .help(loading ? "AI 建议生成中" : "重新生成")
         .accessibilityLabel("重新生成")
+    }
+}
+
+extension AppModel {
+    /// "Source → target" for the preview title bar: where the clip came from and where paste goes.
+    var suggestionRoute: String {
+        let target = pasteEngine.target?.name ?? "复制到剪贴板"
+        if selectedIDs.count > 1 { return "已选 \(selectedIDs.count) 项 → \(target)" }
+        let source = selectedItems.first?.sourceName ?? ""
+        return "\(source.isEmpty ? "未知来源" : source) → \(target)"
     }
 }

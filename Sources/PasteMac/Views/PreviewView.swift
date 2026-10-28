@@ -30,11 +30,12 @@ struct PreviewView: View {
         Group {
             if let value = current {
                 WindowScaffold(value.title.isEmpty ? value.kind.displayName : value.title,
-                               subtitle: "\(value.sourceName) · \(value.createdAt.formatted(date: .abbreviated, time: .shortened))") {
+                               subtitle: "\(value.sourceName) · \(value.createdAt.formatted(date: .abbreviated, time: .shortened))",
+                               caption: model.suggestionStripAvailable ? model.suggestionRoute : nil) {
                     accessory(value)
                 } content: {
                     HStack(alignment: .top, spacing: DesignTokens.Space.lg) {
-                        mainContent(value).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        mainContent(value).frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                         // Results only; the actions that create them live in the ⋯ menu.
                         let enriched = value.enrichment?.ocr != nil || value.enrichment?.translation != nil
                         if enriched || model.suggestionStripAvailable {
@@ -45,7 +46,9 @@ struct PreviewView: View {
                                 }
                             }
                             .scrollIndicators(.automatic)
-                            .frame(width: 300)
+                            .frame(width: PopupMetrics.sideColumnWidth)
+                            .frame(maxHeight: .infinity, alignment: .top)
+                            .layoutPriority(1)
                         }
                     }
                 } footer: {
@@ -70,15 +73,13 @@ struct PreviewView: View {
         let items = model.visibleItems
         let index = items.firstIndex { $0.id == value.id }
         return HStack(spacing: DesignTokens.Space.sm) {
-            HStack(spacing: 0) {
-                PopupIconButton(symbol: "chevron.left", label: "上一张 (←)") { model.movePreview(-1) }
+            PopupGlassToolbar {
+                PopupToolbarButton(symbol: "chevron.left", label: "上一张 (←)") { model.movePreview(-1) }
                     .disabled(index.map { $0 == 0 } ?? true)
-                PopupIconButton(symbol: "chevron.right", label: "下一张 (→)") { model.movePreview(1) }
+                PopupToolbarButton(symbol: "chevron.right", label: "下一张 (→)") { model.movePreview(1) }
                     .disabled(index.map { $0 >= items.count - 1 } ?? true)
             }
-            .padding(2)
-            .background(Capsule().fill(Color.primary.opacity(0.05)))
-            moreMenu(value)
+            PopupGlassToolbar { moreMenu(value) }
         }
     }
     /// Everything beyond paste and copy: the panel pages, recognition and image or file tools.
@@ -118,9 +119,9 @@ struct PreviewView: View {
                 }
             }
         } label: {
-            Image(systemName: "ellipsis.circle")
+            PopupToolbarGlyph(symbol: "ellipsis")
         }
-        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().focusEffectDisabled()
         .help("更多操作").accessibilityLabel("更多操作")
     }
     private func footerNote(_ value: ClipItem) -> String {
