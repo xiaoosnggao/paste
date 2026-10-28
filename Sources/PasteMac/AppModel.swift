@@ -158,6 +158,8 @@ final class AppModel: ObservableObject {
     var onEditor: ((ClipItem?) -> Void)?
     var onEditorClose: (() -> Void)?
     var onPreview: ((ClipItem) -> Void)?
+    /// Whether the preview window is really on screen, so Space never toggles stale state.
+    var isPreviewWindowVisible: (() -> Bool)?
     /// Closes the preview window.
     var onPreviewClose: (() -> Void)?
     /// Brings the panel back so a detail page opened from the preview window shows.

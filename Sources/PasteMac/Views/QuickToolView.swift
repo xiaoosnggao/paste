@@ -49,20 +49,112 @@ struct QuickToolView: View {
 
     private var hostedBody: some View {
         PanelDetailScaffold(model: model, item: item, page: .translate, title: "识别与翻译") {
-            VStack(spacing: DesignTokens.Space.sm) {
-                HStack(spacing: DesignTokens.Space.sm) {
-                    services
-                    Image(systemName: "lock.shield").font(.scaled(.caption)).foregroundStyle(.tertiary)
-                        .help("系统服务在本机处理；云服务仅接收当前图片或文字。")
-                    ToolIconButton(symbol: "slider.horizontal.3", label: "服务设置") { model.onSettings?() }
-                }
+            VStack(spacing: PopupMetrics.gap) {
+                languageBar
                 if hasImage { imageStrip }
-                content
+                hostedPanes
                 if let error = model.toolError ?? model.storageError { errorRow(error) }
             }
         } footer: {
             footer
         }
+    }
+
+    private static let languages: [(tag: String, title: String)] = [
+        ("zh", "简体中文"), ("en", "英语"), ("ja", "日语"), ("ko", "韩语"), ("zh-Hant", "繁体中文"), ("fr", "法语"),
+    ]
+    private var targetTitle: String {
+        Self.languages.first { $0.tag == model.toolConfiguration.targetLanguage }?.title ?? model.toolConfiguration.targetLanguage
+    }
+
+    /// Translate-style header: source chip ⇄ target chip, the service on the trailing side.
+    private var languageBar: some View {
+        HStack(spacing: DesignTokens.Space.sm) {
+            LanguageChip(title: "自动检测", symbol: hasImage ? "viewfinder" : "text.magnifyingglass")
+                .help(hasImage ? "识别：\(model.toolConfiguration.ocrProviderTitle)" : "自动检测原文语言")
+            Button {
+                var configuration = model.toolConfiguration
+                configuration.targetLanguage = configuration.targetLanguage.hasPrefix("zh") ? "en" : "zh"
+                model.toolConfiguration = configuration
+            } label: {
+                Image(systemName: "arrow.left.arrow.right").font(.scaled(.label, weight: .semibold))
+                    .foregroundStyle(PanelPalette.accent)
+                    .frame(width: 30, height: 30)
+                    .background(Circle().fill(PanelPalette.accent.opacity(0.12)))
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .help("在中文与英语之间切换目标语言")
+            .accessibilityLabel("切换目标语言")
+            Menu {
+                Picker("目标语言", selection: $model.toolConfiguration.targetLanguage) {
+                    ForEach(Self.languages, id: \.tag) { Text($0.title).tag($0.tag) }
+                }.pickerStyle(.inline)
+            } label: {
+                LanguageChip(title: targetTitle, symbol: nil, accent: true, menu: true)
+            }
+            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+            .accessibilityLabel("目标语言：\(targetTitle)")
+            Spacer(minLength: DesignTokens.Space.sm)
+            services
+            PopupIconButton(symbol: "slider.horizontal.3", label: "服务设置") { model.onSettings?() }
+        }
+        .frame(height: 32)
+    }
+
+    private var hostedPanes: some View {
+        HStack(spacing: PopupMetrics.gap) {
+            VStack(alignment: .leading, spacing: DesignTokens.Space.xs) {
+                PopupCardHeader(hasImage ? "识别文字" : "原文") {
+                    if dirty {
+                        PopupIconButton(symbol: "checkmark", label: "保存修改") { _ = model.saveToolInput() }
+                            .disabled(model.toolBusy)
+                    }
+                    PopupIconButton(symbol: copied == "source" ? "checkmark" : "doc.on.doc", label: "复制原文") { copy(model.toolInputText, pane: "source") }
+                        .disabled(model.toolInputText.isEmpty)
+                }
+                ZStack(alignment: .topLeading) {
+                    if model.toolInputText.isEmpty {
+                        Text(hasImage ? "等待识别文字…" : "输入或粘贴文字…")
+                            .font(.scaled(.title)).foregroundStyle(.tertiary)
+                            .allowsHitTesting(false)
+                    }
+                    ToolSourceEditor(text: model.toolInputText, focused: $sourceFocused,
+                                     label: hasImage ? "识别文字" : "原文") { text, composing in
+                        model.editToolInput(text, isComposing: composing)
+                    }
+                }.frame(maxHeight: .infinity)
+                Text("\(model.toolInputText.count) 个字符").font(.scaled(.micro).monospacedDigit()).foregroundStyle(.tertiary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .popupCard(padding: DesignTokens.Space.md, focused: sourceFocused)
+
+            VStack(alignment: .leading, spacing: DesignTokens.Space.xs) {
+                PopupCardHeader(staleTranslation ? "译文 · 待更新" : targetTitle) {
+                    if staleTranslation {
+                        Image(systemName: "arrow.clockwise").font(.scaled(.micro)).foregroundStyle(.orange).help("原文或翻译设置已更改")
+                    }
+                    PopupIconButton(symbol: copied == "translation" ? "checkmark" : "doc.on.doc", label: "复制译文") {
+                        if let translation { copy(translation.translatedText, pane: "translation") }
+                    }.disabled(translation == nil)
+                }
+                if let translation {
+                    ScrollView {
+                        Text(translation.translatedText).font(.scaled(.title)).lineSpacing(5)
+                            .textSelection(.enabled).fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
+                    }.frame(maxHeight: .infinity)
+                    Text(shortName(translation.provider)).font(.scaled(.micro)).foregroundStyle(.tertiary).lineLimit(1)
+                } else {
+                    PopupEmptyState(symbol: "character.bubble",
+                                    title: model.toolBusy ? "正在翻译…" : "译文会显示在这里",
+                                    hint: model.toolBusy ? nil : "↩ 翻译 · ⇧↩ 换行",
+                                    busy: model.toolBusy)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .popupCard(padding: DesignTokens.Space.md, tint: PanelPalette.accent)
+        }
+        .frame(maxHeight: .infinity)
     }
 
     private var titlebar: some View {
@@ -129,12 +221,14 @@ struct QuickToolView: View {
                 Label(shortName(model.toolConfiguration.translationProviderTitle), systemImage: "character.bubble")
                     .font(.scaled(.caption, weight: .medium))
             }.menuStyle(.borderlessButton).fixedSize()
+            if !hosted {
             Spacer(minLength: 8)
             Image(systemName: "arrow.right").font(.scaled(.micro)).foregroundStyle(.tertiary)
             Picker("目标语言", selection: $model.toolConfiguration.targetLanguage) {
                 Text("简体中文").tag("zh"); Text("英语").tag("en"); Text("日语").tag("ja")
                 Text("韩语").tag("ko"); Text("繁体中文").tag("zh-Hant"); Text("法语").tag("fr")
             }.labelsHidden().pickerStyle(.menu).fixedSize().controlSize(.small)
+            }
         }.disabled(model.toolBusy)
     }
 
@@ -253,7 +347,7 @@ struct QuickToolView: View {
             }
             Spacer(minLength: 8)
             if model.toolBusy {
-                Button("取消", action: model.cancelToolOperation).controlSize(.regular)
+                Button("取消", action: model.cancelToolOperation).popupSecondaryStyle()
             } else {
                 Button { model.translateToolInput() } label: {
                     HStack(spacing: 10) {
@@ -361,5 +455,26 @@ private struct ToolWindowDragRegion: NSViewRepresentable {
     private final class DragView: NSView {
         override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
         override func mouseDown(with event: NSEvent) { window?.performDrag(with: event) }
+    }
+}
+
+/// A rounded language chip in the translate header.
+private struct LanguageChip: View {
+    let title: String
+    let symbol: String?
+    var accent = false
+    var menu = false
+    @Environment(\.colorScheme) private var scheme
+    var body: some View {
+        HStack(spacing: DesignTokens.Space.xs) {
+            if let symbol { Image(systemName: symbol).font(.scaled(.caption, weight: .medium)) }
+            Text(title).font(.scaled(.label, weight: .semibold))
+            if menu { Image(systemName: "chevron.down").font(.scaled(.micro, weight: .bold)).opacity(0.6) }
+        }
+        .foregroundStyle(accent ? PanelPalette.accent : PanelPalette.text)
+        .padding(.horizontal, DesignTokens.Space.md)
+        .frame(height: 30)
+        .background(Capsule().fill(accent ? PanelPalette.accent.opacity(0.12) : Color.primary.opacity(scheme == .dark ? 0.10 : 0.06)))
+        .fixedSize()
     }
 }
