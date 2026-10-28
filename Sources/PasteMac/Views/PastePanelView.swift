@@ -9,6 +9,7 @@ struct PastePanelView: View {
     @State private var renameText = ""
     @State private var searchFocused = false
     @State private var boardNameFocused: UUID?
+    @State private var pendingBoardDeletion: Pinboard?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -34,6 +35,14 @@ struct PastePanelView: View {
         .onChange(of: model.filter) { _, _ in model.selectFirstIfNeeded() }
         .sheet(item: $classificationBoard) { board in CategoryClassificationSettings(model: model, board: board) }
         .onChange(of: model.selectedPinboardID) { _, _ in model.selectFirstIfNeeded() }
+        .confirmationDialog(pendingBoardDeletion.map { "删除收藏夹“\($0.name)”？" } ?? "删除收藏夹？",
+                            isPresented: Binding(get: { pendingBoardDeletion != nil }, set: { if !$0 { pendingBoardDeletion = nil } }),
+                            titleVisibility: .visible, presenting: pendingBoardDeletion) { board in
+            Button("删除", role: .destructive) { model.deletePinboard(board.id) }
+            Button("取消", role: .cancel) {}
+        } message: { _ in
+            Text("其中的卡片仍保留在剪贴板历史中，可按 ⌘Z 撤销。")
+        }
     }
 
     @ViewBuilder private var deck: some View {
@@ -151,7 +160,7 @@ struct PastePanelView: View {
                                             Button("自动归类设置…") { classificationBoard = board }
                                             Button("向左移动") { model.movePinboard(board.id, delta: -1) }
                                             Button("向右移动") { model.movePinboard(board.id, delta: 1) }
-                                            Button("删除收藏夹", role: .destructive) { model.deletePinboard(board.id) }
+                                            Button("删除收藏夹…", role: .destructive) { pendingBoardDeletion = board }
                                         }
                                         .dropDestination(for: String.self) { values, _ in
                                             model.selectedIDs = Set(values.compactMap(UUID.init(uuidString:)))
