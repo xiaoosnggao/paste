@@ -177,7 +177,13 @@ enum KnowledgeRegressionChecks {
         let scoped = try make([invoice, unrelated])
         let scopeDirectory = scoped.repository.databaseURL.deletingLastPathComponent()
         let scopeIndex = KnowledgeIndexRepository(directory: scopeDirectory)
-        let vector = try await LocalKnowledgeEmbeddingProvider().embed(scopeQuery, languageCode: "en")
+        let vector: KnowledgeVector
+        do {
+            vector = try await LocalKnowledgeEmbeddingProvider().embed(scopeQuery, languageCode: "en")
+        } catch LocalKnowledgeEmbeddingProvider.Failure.modelUnavailable {
+            print("SKIP: semantic deletion scope check (local sentence-embedding model unavailable)")
+            return count
+        }
         while let job = try scopeIndex.nextJob() {
             _ = try scopeIndex.complete(job, chunks: [.init(ordinal: 0, text: "fixture", vector: vector)])
         }
