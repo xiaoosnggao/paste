@@ -17,7 +17,8 @@ final class AppModel: ObservableObject {
     @Published var panelDetail: PanelDetailState? { didSet { if panelDetail != oldValue { panelDetailChanged(from: oldValue) } } }
     /// The detail card height for the panel's current screen.
     /// The card the preview window shows; nil while it is closed.
-    @Published var previewItemID: UUID?
+    /// Suggestions are requested only while the preview window is open.
+    @Published var previewItemID: UUID? { didSet { if previewItemID != oldValue { scheduleContextSuggestions() } } }
     @Published var panelDetailContentHeight = PanelDetailLayout.contentHeight
     var onPanelDetailChange: (() -> Void)?
     /// Unsaved editor text per card (nil key: a new text). Kept while the panel hides.
@@ -51,9 +52,6 @@ final class AppModel: ObservableObject {
         didSet {
             if let data = try? JSONEncoder().encode(toolConfiguration) { toolDefaults.set(data, forKey: "cloudToolConfiguration.v1") }
             scheduleContextSuggestions()
-            // The strip has a fixed height but only exists while suggestions can run.
-            if toolConfiguration.contextSuggestionsEnabled != oldValue.contextSuggestionsEnabled
-                || toolConfiguration != oldValue { onSuggestionPanelChange?(contextSuggestionsPresented) }
             let ocrChanged = !toolConfiguration.hasSameOCRSettings(as: oldValue)
             let translationChanged = !toolConfiguration.hasSameTranslationSettings(as: oldValue)
             if ocrChanged || translationChanged {

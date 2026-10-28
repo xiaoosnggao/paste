@@ -74,7 +74,7 @@ enum KnowledgeInteractionPreview {
         let frameAnimator = PanelFrameAnimator()
         value.onSuggestionPanelChange = { [weak panel, weak value] _ in
             guard let panel, let value else { return }
-            let expanded = value.suggestionStripAvailable
+            let expanded = false
             frameAnimator.animate(panel, to: PanelPresentation.visibleFrame(on: previewScreen, suggestionsVisible: expanded, additionalHeight: value.suggestionAdditionalHeight),
                                   reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
         }

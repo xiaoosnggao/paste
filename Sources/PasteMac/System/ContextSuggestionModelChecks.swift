@@ -43,6 +43,8 @@ enum ContextSuggestionModelChecks {
             if configured { model.toolConfiguration.aiServices = [service]; model.toolConfiguration.translationAIServiceID = service.id }
             model.suggestionSessionActive = true
             model.select(source)
+            // Suggestions are fetched only while the preview window shows a card.
+            model.preview(source)
             models.append(model)
             return model
         }
@@ -292,27 +294,18 @@ enum ContextSuggestionModelChecks {
         try check(!presentationChanges.contains(false),
                   "loading-to-results transition briefly collapsed the suggestions region")
         presentationChanges.removeAll()
-        let screen = NSRect(x: 0, y: 0, width: 1440, height: 900)
-        let loadingFrame = PanelPresentation.visibleFrame(on: screen, suggestionsVisible: expansion.suggestionStripAvailable,
-                                                           additionalHeight: expansion.suggestionAdditionalHeight)
         expansion.select(other)
         try check(!expansion.ruleSuggestions.isEmpty && expansion.displayedSuggestions.first?.origin == .rule,
                   "local rule suggestions were not shown instantly while AI loads")
         try check(expansion.suggestionStripAvailable && expansion.suggestionAdditionalHeight == 0,
-                  "suggestion strip was unavailable or grew")
+                  "preview suggestions were unavailable or resized the panel")
         try check(expansion.contextSuggestionsLoading && expansion.contextSuggestionsPresented,
                   "selecting another card collapsed the existing region instead of showing loading")
         try await eventually { !expansion.contextSuggestionsLoading && expansion.contextSuggestions.first?.title == other.text }
         try check(!presentationChanges.contains(false),
                   "card-switch loading transition briefly collapsed the suggestions region")
-        try check(PanelPresentation.visibleFrame(on: screen, suggestionsVisible: expansion.suggestionStripAvailable,
-                                                 additionalHeight: expansion.suggestionAdditionalHeight) == loadingFrame,
-                  "suggestion strip height changed between loading and results")
         expansion.dismissContextSuggestions()
-        try check(expansion.suggestionStripShowsHint && expansion.suggestionStripAvailable
-                  && PanelPresentation.visibleFrame(on: screen, suggestionsVisible: expansion.suggestionStripAvailable,
-                                                    additionalHeight: expansion.suggestionAdditionalHeight) == loadingFrame,
-                  "dismissing suggestions left an empty gap or resized the panel")
+        try check(expansion.suggestionStripShowsHint, "dismissed suggestions left no way back in the preview window")
         try check(!expansion.contextSuggestionsPresented && presentationChanges.last == false,
                   "dismissing suggestions failed to remove the presented region")
 
@@ -388,20 +381,25 @@ enum ContextSuggestionModelChecks {
         await staleCalls.release()
         try await settle()
         try check(stale.snapshot.items.count == 2, "late transformation for previous selection created a result")
-        // ⌘J: the 建议 page keeps the suggestion session alive instead of clearing it.
+        // Suggestions live only in the preview window; ⌘J opens it.
         let pageCalls = ContextSuggestionRecorder()
         let paged = make(pageCalls)
         try await eventually { paged.contextSuggestionsVisible }
-        paged.select(source)
+        paged.previewWindowClosed()
+        try check(paged.contextSuggestionKey == nil && paged.displayedSuggestions.isEmpty, "closing preview kept suggestions")
+        let before = await pageCalls.inputs.count
+        paged.select(other)
+        try await settle()
+        try check(await pageCalls.inputs.count == before && paged.contextSuggestionKey == nil,
+                  "selecting a card in the panel requested suggestions")
+        paged.openPanelDetailForSelection(.suggestions)
+        try check(paged.previewItemID == other.id && paged.panelDetail == nil, "⌘J did not open the preview window")
+        try check(paged.contextSuggestionKey != nil && !paged.ruleSuggestions.isEmpty, "preview did not show suggestions at once")
+        try check(PanelPresentation.visibleFrame(on: NSRect(x: 0, y: 0, width: 1440, height: 900), suggestionsVisible: false)
+                  == PanelPresentation.visibleFrame(on: NSRect(x: 0, y: 0, width: 1440, height: 900)), "panel reserved a suggestion slot")
         paged.selectedIDs = [source.id, other.id]
         try await settle()
-        try check(paged.suggestionAdditionalHeight == 0, "multi-select summary resized the panel")
-        paged.select(source)
-        try await settle()
-        paged.openPanelDetailForSelection(.suggestions)
-        try check(paged.panelDetail?.page == .suggestions, "⌘J did not open the 建议 page")
-        try check(paged.contextSuggestionKey != nil, "the 建议 page cleared the suggestions it shows")
-        paged.closePanelDetail()
+        try check(paged.contextSuggestionKey?.cards.count == 2, "multi-select in preview did not request the summary")
 
         // Background precompute follows the settings toggle.
         let preCalls = ContextSuggestionRecorder()

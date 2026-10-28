@@ -222,7 +222,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private func panelDestination(on screen: NSRect) -> NSRect {
         let detailHeight = PanelDetailLayout.contentHeight(forScreenHeight: screen.height)
         if model.panelDetailContentHeight != detailHeight { model.panelDetailContentHeight = detailHeight }
-        return PanelPresentation.visibleFrame(on: screen, suggestionsVisible: model.suggestionStripAvailable,
+        return PanelPresentation.visibleFrame(on: screen, suggestionsVisible: false,
                                               additionalHeight: model.suggestionAdditionalHeight,
                                               detailContentHeight: model.panelDetail == nil ? nil : detailHeight)
     }
@@ -517,7 +517,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         previewKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, let preview = self.previewWindow, event.window === preview else { return event }
             if let text = preview.firstResponder as? NSTextView, text.hasMarkedText() || text.isEditable { return event }
-            guard event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty else { return event }
+            let flags = event.modifierFlags.intersection([.command, .option, .control, .shift])
+            // ⌥1–5 apply the preview window's suggestions.
+            if flags == .option, let number = PanelKeyboard.digit(for: event.keyCode), (1...5).contains(number),
+               self.model.displayedSuggestions.indices.contains(number - 1) {
+                if !event.isARepeat { self.model.applyContextSuggestion(self.model.displayedSuggestions[number - 1]) }
+                return nil
+            }
+            guard flags.isEmpty else { return event }
             switch event.keyCode {
             case 123: self.model.movePreview(-1); return nil
             case 124: self.model.movePreview(1); return nil
@@ -566,12 +573,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             case .closeDetail: model.closePanelDetail(); return true
             case .hidePanel: hidePanel(restoreTarget: true); return true
             }
-        }
-        if flags == .option, !textEditing,
-           let number = PanelKeyboard.digit(for: event.keyCode),
-           (1...5).contains(number), model.displayedSuggestions.indices.contains(number - 1) {
-            if !event.isARepeat { model.applyContextSuggestion(model.displayedSuggestions[number - 1]) }
-            return true
         }
         if flags.contains(.command), let key = event.charactersIgnoringModifiers?.lowercased() {
             if key == "f" { model.isSearchVisible.toggle(); return true }

@@ -91,7 +91,8 @@ extension AppModel {
                 else { translateItem(item) }
             }
         case .intelligence: intelligence(item)
-        case .suggestions: openPanelDetail(.suggestions, itemID: item.id)
+        // ⌘J: the preview window carries the suggestions; it keeps a multi-selection for its summary.
+        case .suggestions: if previewItemID == nil { preview(item) }
         }
     }
 
@@ -174,10 +175,8 @@ extension AppModel {
         if let old, old.page == .edit, panelDetail != old, panelEditorDrafts[old.itemID]?.isDirty != true {
             panelEditorDrafts[old.itemID] = nil
         }
-        // Opening the layer hides the suggestions bar; closing it brings the bar back.
-        // The 建议 page keeps the strip's request running; other pages pause it.
-        func showsSuggestions(_ state: PanelDetailState?) -> Bool { state == nil || state?.page == .suggestions }
-        if showsSuggestions(panelDetail) != showsSuggestions(old) { scheduleContextSuggestions() }
+        // A detail page pauses the preview window's suggestions; closing it resumes them.
+        if (panelDetail == nil) != (old == nil) { scheduleContextSuggestions() }
         onPanelDetailChange?()
     }
 }

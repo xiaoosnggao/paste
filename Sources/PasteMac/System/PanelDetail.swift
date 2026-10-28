@@ -11,9 +11,10 @@ enum PanelDetailPage: String, CaseIterable, Identifiable, Sendable {
 
     var id: String { rawValue }
     /// The layer's own pages. Edit comes first and is the default.
-    static let layerPages: [PanelDetailPage] = [.edit, .translate, .intelligence, .suggestions]
+    static let layerPages: [PanelDetailPage] = [.edit, .translate, .intelligence]
     /// Whether the page opens in the panel instead of the preview window.
-    var opensInPanel: Bool { self != .preview }
+    /// Preview and its 建议 section live in the preview window, never in the panel.
+    var opensInPanel: Bool { self != .preview && self != .suggestions }
     var title: String {
         switch self {
         case .preview: "预览"

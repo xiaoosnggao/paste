@@ -17,7 +17,7 @@ struct PanelDetailView: View {
             case .preview, .edit: EditorView(model: model, itemID: detail.itemID)
             case .translate: QuickToolView(model: model, hosted: true)
             case .intelligence: IntelligenceView(model: model, itemID: detail.itemID)
-            case .suggestions: SuggestionsDetailPage(model: model, itemID: detail.itemID)
+            case .suggestions: EmptyView() // opens the preview window instead
             }
         }
         .id(detail)

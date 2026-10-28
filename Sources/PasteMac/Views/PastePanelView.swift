@@ -26,11 +26,6 @@ struct PastePanelView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             .clipped()
             toolbar
-            // Fixed height: shown whenever suggestions can run, so results never resize the panel.
-            if model.suggestionStripAvailable && model.panelDetail == nil {
-                SuggestionStripView(model: model)
-                    .padding(.top, PanelPresentation.suggestionSpacing)
-            }
             Color.clear.frame(height: PanelMetrics.toolbarDeckSpacing)
             deck.frame(height: PanelMetrics.deckHeight)
         }

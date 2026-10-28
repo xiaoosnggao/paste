@@ -58,7 +58,7 @@ extension AppModel {
     /// regardless of loading state, so the panel never resizes while results arrive.
     /// After dismissal the strip keeps its slot and shows only a quiet "✨ ⌘J 建议" hint.
     var suggestionStripShowsHint: Bool {
-        !selectedIDs.isEmpty && contextSuggestionKey == nil && !contextSuggestionsLoading
+        previewItemID != nil && contextSuggestionKey == nil && !contextSuggestionsLoading
             && displayedSuggestions.isEmpty && contextSuggestionsError == nil
     }
 
@@ -91,10 +91,13 @@ extension AppModel {
     }
 
     func currentContextSuggestionKey() -> ContextSuggestionRequestKey? {
-        // The detail layer and the suggestions bar share the space above the panel's bottom edge.
-        guard suggestionSessionActive, panelDetail == nil || panelDetail?.page == .suggestions, toolConfiguration.contextSuggestionsEnabled,
-              (!isDemo || suggestionOperationsInjected), !isPasting, !toolBusy,
-              !selectedIDs.isEmpty, let item = selectedItems.first,
+        // Suggestions live in the preview window: nothing is requested for a mere panel selection.
+        // A multi-selection that includes the previewed card gets the summary; otherwise the previewed card.
+        guard suggestionSessionActive, panelDetail == nil, let previewID = previewItemID, toolConfiguration.contextSuggestionsEnabled,
+              (!isDemo || suggestionOperationsInjected), !isPasting, !toolBusy else { return nil }
+        let multi = selectedIDs.count > 1 && selectedIDs.contains(previewID)
+        let selectedItems = multi ? self.selectedItems : (snapshot.items.first { $0.id == previewID }).map { [$0] } ?? []
+        guard let item = selectedItems.first,
               (selectedItems.count > 1 || (!item.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && item.kind != .image && item.kind != .file)),
               let service = contextSuggestionService else { return nil }
         let cards: [MultiCardContextCard] = selectedItems.count > 1 ? selectedItems.map { card in
