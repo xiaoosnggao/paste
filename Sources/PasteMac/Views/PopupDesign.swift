@@ -18,7 +18,7 @@ enum PopupMetrics {
     /// Outer height of a title-bar glass control (pill height = circle diameter).
     static var glassControlHeight: CGFloat { glassButtonSize + 4 }
     /// Fallback for the traffic lights' center line until it is measured from the window.
-    static let trafficLightCenterY: CGFloat = 18
+    static let trafficLightCenterY: CGFloat = TrafficLightGeometry.targetCenterFromTop
     /// Gap from the window's right edge to the last title-bar control, mirroring the traffic lights' left inset.
     static let toolbarTrailingInset: CGFloat = 16
 }

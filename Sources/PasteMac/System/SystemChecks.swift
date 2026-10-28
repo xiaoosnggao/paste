@@ -166,6 +166,14 @@ enum SystemChecks {
         if let measured = TrafficLightGeometry.measure(lightsWindow) {
             try check(measured > 4 && measured < 40, "measured traffic-light center \(measured) is implausible")
         }
+        try check(TrafficLightGeometry.titlebarDrop(containerHeight: 28, target: 23) == 9, "titlebar drop math is wrong")
+        try check(TrafficLightGeometry.buttonOrigins(sizes: [NSSize(width: 14, height: 14), NSSize(width: 14, height: 14)], step: 20,
+                                                     stripHeight: 28, leading: 16) == [NSPoint(x: 16, y: 7), NSPoint(x: 36, y: 7)],
+                  "traffic-light origins are wrong")
+        TrafficLightGeometry.applyLayout(to: lightsWindow)
+        if let moved = TrafficLightGeometry.measure(lightsWindow) {
+            try check(abs(moved - TrafficLightGeometry.targetCenterFromTop) <= 1, "traffic lights did not move to \(TrafficLightGeometry.targetCenterFromTop), got \(moved)")
+        }
         lightsWindow.close()
         let upper = NSRect(x: 0, y: 1080, width: 1920, height: 1080)
         let lower = NSRect(x: 0, y: 0, width: 1920, height: 1080)
@@ -318,6 +326,7 @@ enum SystemChecks {
         count += try await IntelligenceChecks.run()
         count += try await MCPChecks.run()
         count += try await AppDelegate.checkCapturePanelHandoff()
+        count += try await AppDelegate.checkColdStartPreview()
         count += try ScreenshotChecks.run()
         count += try await ScreenshotChecks.runLifecycle()
         count += try MenuShortcut.checkPresentation()

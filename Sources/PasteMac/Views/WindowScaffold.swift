@@ -7,7 +7,7 @@ enum WindowMetrics {
     /// full-size content view, so the traffic lights sit inside this strip.
     static let titleBarHeight: CGFloat = 44
     /// Clears the close, minimize and zoom buttons.
-    static let trafficLightInset: CGFloat = 76
+    static let trafficLightInset: CGFloat = 84
     static let contentPadding = DesignTokens.Space.lg
     static let sectionSpacing = DesignTokens.Space.md
     static let footerHeight: CGFloat = 52
