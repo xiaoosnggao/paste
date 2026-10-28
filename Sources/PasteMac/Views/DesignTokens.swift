@@ -38,6 +38,8 @@ enum DesignTokens {
         static let lg: CGFloat = 12
         /// Large swatches and previews.
         static let xl: CGFloat = 20
+        /// Content cards inside popup windows.
+        static let card: CGFloat = 16
         /// Floating glass windows (quick tool, onboarding).
         static let window: CGFloat = 14
         /// The clipboard panel itself.

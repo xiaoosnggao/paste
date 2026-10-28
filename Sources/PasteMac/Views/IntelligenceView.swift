@@ -21,10 +21,10 @@ struct IntelligenceView: View {
             if let item = current {
                 PanelDetailScaffold(model: model, item: item, page: .intelligence, title: "智能处理",
                                     showsFooter: busy || !result.isEmpty || error != nil || savedMessage != nil) {
-                    HStack(alignment: .top, spacing: DesignTokens.Space.lg) {
+                    HStack(alignment: .top, spacing: PopupMetrics.gap + DesignTokens.Space.xs) {
                         ScrollView { actions.frame(maxWidth: .infinity, alignment: .leading) }
-                            .scrollIndicators(.automatic)
-                            .frame(width: 380)
+                            .scrollIndicators(.never)
+                            .frame(width: 300)
                         resultSection.frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                 } footer: {
@@ -41,67 +41,100 @@ struct IntelligenceView: View {
         .onDisappear { task?.cancel() }
     }
     private var actions: some View {
-        VStack(alignment: .leading, spacing: DesignTokens.Space.md) {
+        VStack(alignment: .leading, spacing: DesignTokens.Space.lg) {
             VStack(alignment: .leading, spacing: DesignTokens.Space.sm) {
-                HStack(spacing: DesignTokens.Space.sm) {
-                    WindowSectionHeader("Apple 智能")
-                    Button("刷新状态", systemImage: "arrow.clockwise") { availability = IntelligenceService.availability }
-                        .labelStyle(.iconOnly).buttonStyle(.borderless).controlSize(.small).disabled(busy)
-                        .help("刷新 Apple 智能状态")
+                HStack(spacing: DesignTokens.Space.xs) {
+                    PopupCardHeader("Apple 智能", symbol: "apple.intelligence")
+                    PopupIconButton(symbol: "arrow.clockwise", label: "刷新 Apple 智能状态") { availability = IntelligenceService.availability }
+                        .disabled(busy)
                 }
-                Text(availability.message).font(.scaled(.caption)).foregroundStyle(PanelPalette.secondaryText)
-                    .fixedSize(horizontal: false, vertical: true)
-                // Unavailable actions are hidden; the message above says why.
                 if availability.available {
-                    HStack(spacing: DesignTokens.Space.sm) {
-                        ForEach(IntelligenceAction.allCases) { action in
-                            Button(action.rawValue) { startAI(action) }.disabled(busy || tooLong)
-                        }
-                    }
-                }
-                if tooLong {
-                    Text("智能处理最多支持 2400 个字符。请缩短文本后重试。").font(.scaled(.caption)).foregroundStyle(PanelPalette.secondaryText)
-                        .fixedSize(horizontal: false, vertical: true)
+                    tileGrid(IntelligenceAction.allCases.map { action in
+                        Tile(title: action.rawValue, symbol: Self.symbol(action.rawValue), enabled: !busy && !tooLong) { startAI(action) }
+                    })
+                    if tooLong { note("智能处理最多支持 2400 个字符。请缩短文本后重试。", symbol: "exclamationmark.circle") }
+                } else {
+                    // Unavailable actions are hidden; this says why.
+                    note(availability.message, symbol: "info.circle")
                 }
             }
             VStack(alignment: .leading, spacing: DesignTokens.Space.sm) {
-                WindowSectionHeader("文本整理")
-                HStack(spacing: DesignTokens.Space.sm) {
-                    ForEach(LocalTextAction.allCases) { action in Button(action.rawValue) { startLocal(action) }.disabled(busy) }
-                }
+                PopupCardHeader("文本整理", symbol: "wand.and.rays")
+                tileGrid(LocalTextAction.allCases.map { action in
+                    Tile(title: action.rawValue, symbol: Self.symbol(action.rawValue), enabled: !busy) { startLocal(action) }
+                })
             }
         }
-        .controlSize(.small)
     }
+
+    private func tileGrid(_ tiles: [Tile]) -> some View {
+        LazyVGrid(columns: [GridItem(.flexible(), spacing: DesignTokens.Space.sm), GridItem(.flexible(), spacing: DesignTokens.Space.sm)],
+                  spacing: DesignTokens.Space.sm) {
+            ForEach(tiles) { tile in ActionTile(tile: tile) }
+        }
+    }
+
+    private func note(_ text: String, symbol: String) -> some View {
+        HStack(alignment: .top, spacing: DesignTokens.Space.sm) {
+            Image(systemName: symbol).foregroundStyle(PanelPalette.secondaryText).accessibilityHidden(true)
+            Text(text).font(.scaled(.caption)).foregroundStyle(PanelPalette.secondaryText).fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .popupCard(padding: DesignTokens.Space.md)
+    }
+
+    static func symbol(_ name: String) -> String {
+        switch name {
+        case "摘要": "text.quote"
+        case "润色": "wand.and.stars"
+        case "提取要点": "list.bullet.rectangle"
+        default:
+            if name.contains("链接") { "link" }
+            else if name.contains("邮") { "envelope" }
+            else if name.contains("电话") || name.contains("号码") { "phone" }
+            else if name.contains("空") || name.contains("清") { "eraser" }
+            else if name.contains("行") { "text.alignleft" }
+            else if name.contains("大") || name.contains("小写") { "textformat" }
+            else { "sparkle" }
+        }
+    }
+
     private var resultSection: some View {
-        VStack(alignment: .leading, spacing: DesignTokens.Space.sm) {
-            WindowSectionHeader("结果")
+        VStack(alignment: .leading, spacing: DesignTokens.Space.xs) {
+            PopupCardHeader("结果", symbol: "sparkles") {
+                if !result.isEmpty {
+                    PopupIconButton(symbol: "doc.on.doc", label: "复制结果") { copyResult() }.disabled(busy)
+                }
+            }
             Group {
                 if result.isEmpty {
-                    Text(busy ? "正在处理…" : "选择左侧的操作，结果显示在这里。")
-                        .font(.scaled(.body)).foregroundStyle(PanelPalette.secondaryText)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    PopupEmptyState(symbol: "sparkles",
+                                    title: busy ? "正在处理…" : "选择一个操作开始",
+                                    hint: busy ? nil : "结果会显示在这里，可复制或另存为新卡片",
+                                    busy: busy)
                 } else {
                     ScrollView {
-                        Text(result).font(.scaled(.body)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                        Text(result).font(.scaled(.title)).lineSpacing(5).textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
             }
             .frame(maxHeight: .infinity)
-            .windowWell(padding: DesignTokens.Space.sm)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .popupCard(padding: DesignTokens.Space.md, tint: PanelPalette.accent)
     }
     @ViewBuilder private var footer: some View {
         footerStatus
         Spacer()
         if busy {
-            Button("取消") { task?.cancel(); task = nil; operation = UUID(); busy = false }
+            Button("取消") { task?.cancel(); task = nil; operation = UUID(); busy = false }.popupSecondaryStyle()
         }
         if !result.isEmpty {
             Button("保存结果") {
                 if model.saveText(result, title: "处理结果", item: nil) { savedMessage = "结果已保存，相同内容将合并。" }
                 else { error = model.statusMessage ?? "保存失败。" }
-            }.disabled(busy)
+            }.popupSecondaryStyle().disabled(busy)
             Button("复制结果") { copyResult() }
                 .primaryActionStyle()
                 .disabled(busy)
@@ -148,5 +181,44 @@ struct IntelligenceView: View {
             try model.bridge.write([value], plainText: true)
             model.statusMessage = "处理结果已复制"
         } catch { self.error = error.localizedDescription }
+    }
+}
+
+private struct Tile: Identifiable {
+    let title: String
+    let symbol: String
+    let enabled: Bool
+    let action: () -> Void
+    var id: String { title }
+}
+
+/// Writing Tools–style tile: symbol over label on a soft card.
+private struct ActionTile: View {
+    let tile: Tile
+    @State private var hovering = false
+    @Environment(\.colorScheme) private var scheme
+    var body: some View {
+        Button(action: tile.action) {
+            VStack(alignment: .leading, spacing: DesignTokens.Space.sm) {
+                Image(systemName: tile.symbol).font(.scaled(.title, weight: .medium))
+                    .foregroundStyle(PanelPalette.accent)
+                    .frame(width: 28, height: 28)
+                    .background(RoundedRectangle(cornerRadius: DesignTokens.Radius.sm, style: .continuous).fill(PanelPalette.accent.opacity(0.12)))
+                Text(tile.title).font(.scaled(.label, weight: .semibold)).foregroundStyle(PanelPalette.text).lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(DesignTokens.Space.md)
+            .background(RoundedRectangle(cornerRadius: DesignTokens.Radius.lg, style: .continuous)
+                .fill(Color(nsColor: .textBackgroundColor).opacity(scheme == .dark ? (hovering ? 0.45 : 0.30) : (hovering ? 1 : 0.78)))
+                .shadow(color: .black.opacity(scheme == .dark ? 0.2 : 0.05), radius: 6, y: 2))
+            .overlay(RoundedRectangle(cornerRadius: DesignTokens.Radius.lg, style: .continuous)
+                .strokeBorder(hovering ? PanelPalette.accent.opacity(0.4) : Color.primary.opacity(0.06), lineWidth: 1))
+            .contentShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.lg))
+            .opacity(tile.enabled ? 1 : 0.45)
+        }
+        .buttonStyle(.plain)
+        .disabled(!tile.enabled)
+        .onHover { hovering = $0 && tile.enabled }
+        .accessibilityLabel(tile.title)
     }
 }

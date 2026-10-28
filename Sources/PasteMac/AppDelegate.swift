@@ -84,13 +84,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             self.hidePanel()
             self.model.retainHistory(result.sourceIDs, for: "suggestion")
             self.suggestionResultWindow = self.window(title: "处理结果", size: .init(width: 700, height: 540), view: ContextSuggestionResultPreview(model: self.model, result: result))
-            NSApp.activate(); self.suggestionResultWindow?.makeKeyAndOrderFront(nil)
+            self.present(self.suggestionResultWindow)
         }
         model.onHistoryManagementClose = { [weak self] in self?.historyManagementWindow?.close() }
         model.onHistoryManagementPreview = { [weak self] preview in
             guard let self else { return }
             self.historyManagementWindow = self.window(title: "搜索操作", size: .init(width: 480, height: 340), view: HistorySearchManagementView(model: self.model, preview: preview))
-            NSApp.activate(); self.historyManagementWindow?.makeKeyAndOrderFront(nil)
+            self.present(self.historyManagementWindow)
         }
         model.onSuggestionPanelChange = { [weak self] _ in self?.resizePanelForSuggestions() }
         model.onPanelDetailChange = { [weak self] in self?.panelDetailChanged() }
@@ -105,6 +105,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         model.onEditor = { [weak self] item in self?.showEditor(item) }
         model.onEditorClose = { [weak self] in self?.model.cancelPanelEditor() }
         model.onPreview = { [weak self] item in self?.showPreview(item) }
+        model.isPreviewWindowVisible = { [weak self] in self?.previewWindow?.isVisible == true }
         model.onIntelligence = { [weak self] item in self?.showIntelligence(item) }
         model.onStack = { [weak self] in self?.showStack() }
         model.onStackPasted = { [weak self] in self?.placeStackCapsule(followMouse: true) }
@@ -242,8 +243,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             detailWindow = window(title: title, size: .init(width: 760, height: 480), view: PanelDetailWindowView(model: model))
             detailWindow?.minSize = NSSize(width: 520, height: 320)
         }
-        NSApp.activate()
-        detailWindow?.makeKeyAndOrderFront(nil)
+        present(detailWindow)
     }
     private func cancelSuggestionResize() {
         pendingSuggestionResize?.cancel(); pendingSuggestionResize = nil
@@ -330,14 +330,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
         value.setFrameOrigin(AuxiliaryWindowPlacement.origin(size: value.frame.size, visibleFrame: screen.visibleFrame, avoiding: visiblePanel?.frame))
     }
+    /// Brings a secondary window in front and makes it key. An accessory app opened from a
+    /// nonactivating panel or a status menu is not active, and the cooperative
+    /// `NSApp.activate()` of macOS 14 may decline, leaving the window behind other apps.
+    func present(_ window: NSWindow?) {
+        guard let window else { return }
+        if window.isMiniaturized { window.deminiaturize(nil) }
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
+        // Activation completes asynchronously; claim key once it has.
+        DispatchQueue.main.async { if window.isVisible, !window.isKeyWindow { window.makeKeyAndOrderFront(nil) } }
+    }
     private func showSettings() {
         // This status-bar-level, nonactivating panel otherwise remains above
         // the settings window until the hide animation completes.
         hidePanelImmediately()
         if settingsWindow == nil { settingsWindow = window(title: "Pasteboard 设置", size: .init(width: 640, height: 592), view: SettingsView(model: model, mcp: mcpService)) }
         if settingsWindow?.isMiniaturized == true { settingsWindow?.deminiaturize(nil) }
-        NSApp.activate()
-        settingsWindow?.makeKeyAndOrderFront(nil)
+        present(settingsWindow)
     }
     /// Editing opens the panel's edit page; a new text opens it without a card.
     private func showEditor(_ item: ClipItem?) {
@@ -349,14 +360,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private func showPreview(_ item: ClipItem) {
         if model.selectedIDs.isEmpty, model.visibleItems.contains(where: { $0.id == item.id }) { model.select(item) }
         let title = item.title.isEmpty ? item.kind.displayName : String(item.title.prefix(80))
-        if let previewWindow, previewWindow.isVisible {
+        // Reuse the window even when it is ordered out. Closing a hidden one here used to
+        // fire windowWillClose after the new card was set, clearing it again, so the
+        // next Space only "closed" an empty preview and a second press was needed.
+        if let previewWindow {
             previewWindow.title = title
         } else {
-            previewWindow?.close()
             previewWindow = window(title: title, size: .init(width: 720, height: 480), view: PreviewWindowView(model: model))
         }
-        NSApp.activate()
-        previewWindow?.makeKeyAndOrderFront(nil)
+        present(previewWindow)
     }
     private func showStack() {
         model.pasteEngine.rememberTarget()
@@ -668,7 +680,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
     #endif
     @objc private func newText() { showEditor(nil) }
-    @objc private func openSettings() { showSettings() }
+    // The status menu is still tracking when its action runs; activating then is
+    // often refused, so the window ordered in behind the frontmost app. Open after it closes.
+    @objc private func openSettings() { DispatchQueue.main.async { [weak self] in self?.showSettings() } }
     @objc private func openStack() { model.showStack() }
     @objc private func resume() { model.resume() }
     @objc private func pause() { model.pause(minutes: 15) }
@@ -759,7 +773,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             toolWindow.setFrameOrigin(origin)
             positioningToolWindow = false
         }
-        NSApp.activate(); toolWindow.makeKeyAndOrderFront(nil)
+        present(toolWindow)
     }
     private func closeUnpinnedTools() {
         if !model.toolPinned, toolWindow?.isVisible == true { toolWindow?.close() }
@@ -768,7 +782,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         guard selectionTask == nil, screenshotTask == nil, !screenshotCoordinator.isCapturing, !model.isPasting else { return }
         model.toolSessionActive = false
         model.cancelToolOperation(); model.toolItemID = nil; model.toolInputText = ""; model.toolError = nil; model.toolStatus = nil
-        toolWindow?.orderOut(nil); previewWindow?.orderOut(nil); settingsWindow?.orderOut(nil)
+        toolWindow?.orderOut(nil); model.closePreview(); settingsWindow?.orderOut(nil)
         screenshotTask = Task { @MainActor [weak self] in
             guard let self else { return }
             defer { self.screenshotTask = nil }
@@ -837,7 +851,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
     private func showToolPermissionGuide(_ kind: PermissionGuideKind, onAuthorized: @escaping () -> Void) {
         model.toolSessionActive = false
-        hidePanel(); toolWindow?.orderOut(nil); previewWindow?.orderOut(nil)
+        hidePanel(); toolWindow?.orderOut(nil); model.closePreview()
         if accessibilityGuide == nil { accessibilityGuide = AccessibilityGuide(model: model) }
         accessibilityGuide?.show(kind: kind, onAuthorized: onAuthorized)
     }

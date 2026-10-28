@@ -131,6 +131,24 @@ enum ContextSuggestionModelChecks {
         try check(detailed.previewItemID == nil && detailed.panelDetail == PanelDetailState(itemID: other.id, page: .edit),
                   "编辑 in the preview window did not open the edit window")
         detailed.cancelPanelEditor()
+        // Repeated Space: every press flips the window, none is swallowed.
+        var windowVisible = false
+        detailed.onPreview = { _ in windowVisible = true }
+        detailed.onPreviewClose = { windowVisible = false }
+        detailed.isPreviewWindowVisible = { windowVisible }
+        if detailed.previewItemID != nil { detailed.closePreview() }
+        for press in 1...12 {
+            detailed.togglePreview()
+            try check(windowVisible == (press % 2 == 1) && (detailed.previewItemID != nil) == windowVisible,
+                      "Space press \(press) did not toggle the preview window")
+        }
+        // A window ordered out behind the model's back (screenshot, permission guide) reopens on one press.
+        detailed.togglePreview(); try check(windowVisible, "preview did not open before the stale check")
+        windowVisible = false
+        detailed.togglePreview()
+        try check(windowVisible && detailed.previewItemID != nil, "a stale preview needed a second Space press")
+        detailed.closePreview()
+        detailed.isPreviewWindowVisible = nil
         detailed.onPreview = nil; detailed.onPreviewClose = nil; detailed.onRevealPanel = nil; detailed.onEditor = nil
 
         // Edit page: the draft survives Esc and hiding; Cancel drops it; ⌘S saves through the same save.
