@@ -318,6 +318,7 @@ enum SystemChecks {
         count += try PanelMetricsChecks.run()
         count += try PanelKeyboardChecks.run()
         count += try PanelDetailChecks.run()
+        count += try StackCapsuleChecks.run()
         count += try await PanelNoticeChecks.run()
         count += try await ContextSuggestionsChecks.run()
         count += try await ContextSuggestionModelChecks.run()
