@@ -19,10 +19,13 @@ final class KnowledgePerformanceTests: XCTestCase {
         let started = Date()
         // Populate via the real repository in bounded batches. No full-history array is retained.
         for start in stride(from: 0, to: count, by: 1000) {
-            let rows = (start..<min(count,start+1000)).map { i in
-                ClipItem(createdAt: Date(timeIntervalSince1970: Double(i)), lastCopiedAt: Date(timeIntervalSince1970: Double(i)),
-                         title: "合成记录 \(i)", text: "项目报价与交付安排 fixture \(i) " + (i % 100 == 0 ? "目标检索词" : "普通内容"), kind: .text,
-                         sourceBundleID: i % 2 == 0 ? "fixture.wechat" : "fixture.lark", sourceName: i % 2 == 0 ? "微信" : "飞书")
+            let rows = (start..<min(count,start+1000)).map { (i: Int) -> ClipItem in
+                let date = Date(timeIntervalSince1970: Double(i))
+                let keyword: String = i % 100 == 0 ? "目标检索词" : "普通内容"
+                let isWeChat = i % 2 == 0
+                return ClipItem(createdAt: date, lastCopiedAt: date,
+                                title: "合成记录 \(i)", text: "项目报价与交付安排 fixture \(i) \(keyword)", kind: .text,
+                                sourceBundleID: isWeChat ? "fixture.wechat" : "fixture.lark", sourceName: isWeChat ? "微信" : "飞书")
             }
             try repository.applyChanges(metadata: .init(), upserting: rows, deleting: [])
         }

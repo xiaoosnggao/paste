@@ -19,7 +19,9 @@ if not isinstance(value, list) or not value or not all(isinstance(item, str) for
     raise SystemExit('Invalid App Intents protocol list in the selected toolchain.')
 Path(sys.argv[2]).write_text(json.dumps(value))
 PY_PROTOCOLS
-swift build --configuration "$CONFIGURATION" --scratch-path "$ROOT/.build" -Xswiftc -emit-const-values -Xswiftc -const-gather-protocols-list -Xswiftc "$PROTOCOLS"
+# The protocol list is a frontend-only option; the driver rejects it unless
+# it is forwarded with -Xfrontend.
+swift build --configuration "$CONFIGURATION" --scratch-path "$ROOT/.build" -Xswiftc -emit-const-values -Xswiftc -Xfrontend -Xswiftc -const-gather-protocols-file -Xswiftc -Xfrontend -Xswiftc "$PROTOCOLS"
 BIN=$(swift build --configuration "$CONFIGURATION" --scratch-path "$ROOT/.build" --show-bin-path)
 APP=${PASTEBOARD_APP_OUTPUT:-"$ROOT/dist/Pasteboard.app"}
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"

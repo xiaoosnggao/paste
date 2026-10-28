@@ -11,6 +11,7 @@ struct AIServiceSettingsView: View {
     @State private var testTask: Task<Void, Never>?
     @State private var testGeneration = UUID()
     @State private var operationError: String?
+    @State private var pendingDeletion: AIServiceConfig?
 
     var body: some View {
         Group {
@@ -90,6 +91,14 @@ struct AIServiceSettingsView: View {
             testResult.removeAll(); testSuccess.removeAll()
         }
         .onDisappear { testGeneration = UUID(); testTask?.cancel(); testTask = nil; testingID = nil }
+        .confirmationDialog(pendingDeletion.map { "删除“\($0.name)”？" } ?? "删除 AI 服务？",
+                            isPresented: Binding(get: { pendingDeletion != nil }, set: { if !$0 { pendingDeletion = nil } }),
+                            titleVisibility: .visible, presenting: pendingDeletion) { service in
+            Button("删除", role: .destructive) { deleteService(service) }
+            Button("取消", role: .cancel) {}
+        } message: { _ in
+            Text("钥匙串中保存的 API Key 会一并删除，使用此服务的识别或翻译将改回系统服务。此操作无法撤销。")
+        }
     }
 
     @ViewBuilder
@@ -140,8 +149,8 @@ struct AIServiceSettingsView: View {
                 Button("编辑") {
                     editingService = item
                 }.controlSize(.small).disabled(testingID != nil)
-                Button("删除", role: .destructive) {
-                    deleteService(item)
+                Button("删除…", role: .destructive) {
+                    pendingDeletion = item
                 }.controlSize(.small).disabled(testingID != nil)
             }
         }

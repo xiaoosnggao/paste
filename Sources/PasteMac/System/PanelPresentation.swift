@@ -158,7 +158,11 @@ final class PanelGlassSurface: NSView {
             let glass = NSGlassEffectView(frame: bounds)
             glass.style = .regular
             glass.cornerRadius = cornerRadius
+            // effectIsInteractive is only in the macOS 27 SDK (Xcode 27, Swift 6.4);
+            // older SDKs already default to non-interactive glass.
+            #if compiler(>=6.4)
             if #available(macOS 27.0, *) { glass.effectIsInteractive = false }
+            #endif
             // AppKit only guarantees correct glass ordering for contentView.
             glass.contentView = content
             material = .liquidGlass
