@@ -57,7 +57,7 @@ enum PanelDetailPage: String, CaseIterable, Identifiable, Sendable {
 }
 
 /// What the detail layer shows. A nil item is a new text in the editor.
-struct PanelDetailState: Equatable, Sendable {
+struct PanelDetailState: Hashable, Sendable {
     var itemID: UUID?
     var page: PanelDetailPage
 }
@@ -95,5 +95,58 @@ enum PanelEscapeAction: Equatable {
         if composing { return .passToText }
         if textEditing { return fieldEditor ? .passToText : .endTextEditing }
         return detailOpen ? .closeDetail : .hidePanel
+    }
+}
+
+/// The editor page's text, kept until it is saved or cancelled.
+struct PanelEditorDraft {
+    /// The card as loaded when editing began; saving checks it was not deleted meanwhile.
+    let item: ClipItem?
+    var value: NSAttributedString
+    var title: String
+    let originalValue: NSAttributedString
+    let originalTitle: String
+
+    init(item: ClipItem?) {
+        self.item = item
+        let rich = item?.representations.first(where: { $0.type == "public.rtf" }).flatMap {
+            try? NSAttributedString(data: $0.data, options: [.documentType: NSAttributedString.DocumentType.rtf], documentAttributes: nil)
+        }
+        let value = rich ?? NSAttributedString(string: item?.text ?? "", attributes: [.font: NSFont.systemFont(ofSize: 15), .foregroundColor: NSColor.labelColor])
+        self.value = value
+        self.originalValue = value
+        let title = item?.title ?? ""
+        self.title = title
+        self.originalTitle = title
+    }
+
+    var isDirty: Bool { !value.isEqual(to: originalValue) || title != originalTitle }
+}
+
+/// Keys a detail page handles before the panel's own shortcuts.
+/// - Edit: ⌘S saves; Return stays a newline in the editor and does nothing outside it,
+///   so it never pastes another card while a draft is open.
+/// - Translate: Return translates (⇧Return is a newline) and ⌘R retries, as in the tool window.
+/// Nothing is handled while an input method is composing.
+enum PanelDetailKey: Equatable {
+    case save, translate, retry, ignore
+
+    static func resolve(page: PanelDetailPage, keyCode: UInt16, flags: NSEvent.ModifierFlags, key: String?,
+                        textEditing: Bool, composing: Bool, fieldEditor: Bool) -> PanelDetailKey? {
+        guard !composing else { return nil }
+        let returnKey = keyCode == 36 || keyCode == 76
+        switch page {
+        case .edit:
+            if flags == .command, key == "s" { return .save }
+            // Outside any text view (after Esc), Return must not paste the selected card.
+            if returnKey, !textEditing { return .ignore }
+            return nil
+        case .translate:
+            if flags == .command, key == "r" { return .retry }
+            if returnKey, flags.isEmpty, !fieldEditor { return .translate }
+            return nil
+        case .preview, .intelligence:
+            return nil
+        }
     }
 }
