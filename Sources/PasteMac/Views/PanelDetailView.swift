@@ -37,16 +37,19 @@ struct PanelDetailScaffold<Content: View, Footer: View>: View {
     let page: PanelDetailPage
     let title: String
     var subtitle: String?
+    /// Hidden when it would only be an empty bar.
+    var showsFooter = true
     let content: Content
     let footer: Footer
 
-    init(model: AppModel, item: ClipItem?, page: PanelDetailPage, title: String, subtitle: String? = nil,
+    init(model: AppModel, item: ClipItem?, page: PanelDetailPage, title: String, subtitle: String? = nil, showsFooter: Bool = true,
          @ViewBuilder content: () -> Content, @ViewBuilder footer: () -> Footer) {
         self.model = model
         self.item = item
         self.page = page
         self.title = title
         self.subtitle = subtitle
+        self.showsFooter = showsFooter
         self.content = content()
         self.footer = footer()
     }
@@ -60,12 +63,14 @@ struct PanelDetailScaffold<Content: View, Footer: View>: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .padding(.horizontal, DesignTokens.Space.lg)
                 .padding(.vertical, DesignTokens.Space.md)
-            Divider().opacity(0.45)
-            HStack(spacing: DesignTokens.Space.sm) { footer }
-                .font(.scaled(.body))
-                .controlSize(.regular)
-                .padding(.horizontal, DesignTokens.Space.lg)
-                .frame(height: PanelDetailLayout.footerHeight)
+            if showsFooter {
+                Divider().opacity(0.45)
+                HStack(spacing: DesignTokens.Space.sm) { footer }
+                    .font(.scaled(.body))
+                    .controlSize(.regular)
+                    .padding(.horizontal, DesignTokens.Space.lg)
+                    .frame(height: PanelDetailLayout.footerHeight)
+            }
         }
         .foregroundStyle(PanelPalette.text)
         .tint(PanelPalette.accent)

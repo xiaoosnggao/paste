@@ -19,7 +19,8 @@ struct IntelligenceView: View {
     var body: some View {
         Group {
             if let item = current {
-                PanelDetailScaffold(model: model, item: item, page: .intelligence, title: "智能处理") {
+                PanelDetailScaffold(model: model, item: item, page: .intelligence, title: "智能处理",
+                                    showsFooter: busy || !result.isEmpty || error != nil || savedMessage != nil) {
                     HStack(alignment: .top, spacing: DesignTokens.Space.lg) {
                         ScrollView { actions.frame(maxWidth: .infinity, alignment: .leading) }
                             .scrollIndicators(.automatic)
@@ -30,7 +31,7 @@ struct IntelligenceView: View {
                     footer
                 }
             } else {
-                PanelDetailScaffold(model: model, item: nil, page: .intelligence, title: "智能处理") {
+                PanelDetailScaffold(model: model, item: nil, page: .intelligence, title: "智能处理", showsFooter: false) {
                     ContentUnavailableView("此卡片已删除", systemImage: "trash").frame(maxWidth: .infinity, maxHeight: .infinity)
                 } footer: {
                     Spacer()
@@ -44,7 +45,6 @@ struct IntelligenceView: View {
             VStack(alignment: .leading, spacing: DesignTokens.Space.sm) {
                 HStack(spacing: DesignTokens.Space.sm) {
                     WindowSectionHeader("Apple 智能")
-                    Spacer()
                     Button("刷新状态", systemImage: "arrow.clockwise") { availability = IntelligenceService.availability }
                         .labelStyle(.iconOnly).buttonStyle(.borderless).controlSize(.small).disabled(busy)
                         .help("刷新 Apple 智能状态")

@@ -38,6 +38,7 @@ enum SnapshotRenderer {
                 try await render("detail-edit-\(tag)", grown, radius: DesignTokens.Radius.panel, PastePanelView(model: model))
                 model.closePanelDetail()
                 model.toolInputText = text.text
+                model.toolItemID = text.id
                 model.openPanelDetail(.translate, itemID: text.id)
                 try await render("detail-translate-\(tag)", grown, radius: DesignTokens.Radius.panel, PastePanelView(model: model))
                 model.closePanelDetail()
