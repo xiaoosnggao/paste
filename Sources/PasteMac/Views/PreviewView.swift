@@ -38,10 +38,12 @@ struct PreviewView: View {
                         mainContent(value).frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                         // Results only; the actions that create them live in the ⋯ menu.
                         let enriched = value.enrichment?.ocr != nil || value.enrichment?.translation != nil
-                        if enriched || model.suggestionStripAvailable {
+                        let image = value.kind == .image
+                        if enriched || image || model.suggestionStripAvailable {
                             ScrollView {
                                 VStack(alignment: .leading, spacing: DesignTokens.Space.lg) {
                                     if model.suggestionStripAvailable { PreviewSuggestionsSection(model: model) }
+                                    if image { ImageInsightsSection(model: model, item: value) }
                                     if enriched { ClipEnrichmentView(model: model, item: value).controlSize(.small) }
                                 }
                             }

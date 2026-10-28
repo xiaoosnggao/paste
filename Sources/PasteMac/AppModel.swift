@@ -145,6 +145,11 @@ final class AppModel: ObservableObject {
     var historyQueryTask: Task<Void, Never>?
     var knowledgeCoordinator: LocalKnowledgeCoordinator?
     @Published var localIndexStatus: String?
+    /// What the search field understood from a natural-language query (filters + whether meaning-based ranking ran).
+    @Published var searchUnderstanding: SearchUnderstanding?
+    /// The merge (多条合成一条) currently running, if any.
+    @Published var mergeInProgress: ClipMergeMode?
+    var mergeTask: Task<Void, Never>?
     @Published var automaticClassificationEnabled = true
     @Published var suggestedCategories: [UUID: [UUID]] = [:]
     var manualClassificationOverrides: [UUID: Set<UUID>] = [:]

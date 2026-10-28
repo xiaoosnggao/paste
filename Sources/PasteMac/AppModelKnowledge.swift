@@ -77,7 +77,10 @@ extension AppModel {
     func categories(for itemID: UUID) -> [Pinboard] { snapshot.pinboards.filter { $0.itemIDs.contains(itemID) } }
 
     func enrichHistorySearch(plan: KnowledgeQueryPlan, filter: ClipFilter, generation: UUID) async {
-        guard let coordinator = knowledgeCoordinator, !plan.query.isEmpty else { return }
+        guard let coordinator = knowledgeCoordinator, !plan.query.isEmpty else {
+            if !plan.query.isEmpty { searchUnderstanding?.ranking = .keywordOnly }
+            return
+        }
         do {
             let hits = try await coordinator.search(plan.query, filter: filter, board: selectedPinboardID)
             guard !Task.isCancelled, historyQueryGeneration == generation else { return }
@@ -91,10 +94,12 @@ extension AppModel {
             guard historyQueryGeneration == generation, !Task.isCancelled else { return }
             let byID = Dictionary(items.map { ($0.id,$0) },uniquingKeysWith:{first,_ in first})
             installHistoryPage(ids.compactMap { byID[$0] }, offset: 0, total: historyTotalCount)
+            searchUnderstanding?.ranking = hits.isEmpty ? .keywordOnly : .semantic
         } catch is CancellationError { }
         catch {
             // Local models may not support this query language. Keyword results remain usable.
             localIndexStatus = "当前语言暂不支持语义搜索"
+            if historyQueryGeneration == generation { searchUnderstanding?.ranking = .keywordOnly }
         }
     }
     func finishHistoryReplacement() {
