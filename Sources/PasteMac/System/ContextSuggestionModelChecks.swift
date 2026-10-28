@@ -309,6 +309,10 @@ enum ContextSuggestionModelChecks {
                                                  additionalHeight: expansion.suggestionAdditionalHeight) == loadingFrame,
                   "suggestion strip height changed between loading and results")
         expansion.dismissContextSuggestions()
+        try check(expansion.suggestionStripShowsHint && expansion.suggestionStripAvailable
+                  && PanelPresentation.visibleFrame(on: screen, suggestionsVisible: expansion.suggestionStripAvailable,
+                                                    additionalHeight: expansion.suggestionAdditionalHeight) == loadingFrame,
+                  "dismissing suggestions left an empty gap or resized the panel")
         try check(!expansion.contextSuggestionsPresented && presentationChanges.last == false,
                   "dismissing suggestions failed to remove the presented region")
 

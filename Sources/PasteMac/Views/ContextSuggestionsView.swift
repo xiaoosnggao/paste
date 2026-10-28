@@ -10,7 +10,9 @@ struct SuggestionStripView: View {
 
     var body: some View {
         HStack(spacing: DesignTokens.Space.sm) {
-            Image(systemName: "sparkles").foregroundStyle(PanelPalette.accent).accessibilityHidden(true)
+            if !model.suggestionStripShowsHint {
+                Image(systemName: "sparkles").foregroundStyle(PanelPalette.accent).accessibilityHidden(true)
+            }
             ScrollView(.horizontal) {
                 HStack(spacing: DesignTokens.Space.xs) { content }
                     .padding(.vertical, 1).horizontalScrollWheelRouting()
@@ -19,9 +21,7 @@ struct SuggestionStripView: View {
             .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: model.displayedSuggestions.map(\.id))
             Spacer(minLength: 0)
             status
-            Button { model.openPanelDetailForSelection(.suggestions) } label: {
-                Text("详情 ⌘J").font(.scaled(.micro, weight: .medium))
-            }.buttonStyle(.plain).foregroundStyle(PanelPalette.secondaryText).help("查看建议说明与多选摘要 (⌘J)")
+            if !model.suggestionStripShowsHint { detailButton }
         }
         .font(.scaled(.label))
         .padding(.horizontal, PanelMetrics.deckHorizontalPadding)
@@ -32,12 +32,21 @@ struct SuggestionStripView: View {
         .accessibilityValue(model.contextSuggestionsLoading ? "正在生成" : "\(model.displayedSuggestions.count) 项建议")
     }
 
+    private var detailButton: some View {
+            Button { model.openPanelDetailForSelection(.suggestions) } label: {
+                Text("详情 ⌘J").font(.scaled(.micro, weight: .medium))
+            }.buttonStyle(.plain).foregroundStyle(PanelPalette.secondaryText).help("查看建议说明与多选摘要 (⌘J)")
+    }
+
     @ViewBuilder private var content: some View {
         let suggestions = model.displayedSuggestions
         if model.selectedIDs.isEmpty {
             Text("选中卡片后显示建议").foregroundStyle(PanelPalette.secondaryText)
-        } else if model.contextSuggestionKey == nil && !model.contextSuggestionsLoading && suggestions.isEmpty && model.contextSuggestionsError == nil {
-            Button("显示建议", action: model.retryContextSuggestions).buttonStyle(.plain).foregroundStyle(PanelPalette.accent)
+        } else if model.suggestionStripShowsHint {
+            // Dismissed: the slot keeps its height (no panel jump) and shows a quiet hint.
+            Button(action: model.retryContextSuggestions) { Text("✨ ⌘J 建议").font(.scaled(.caption)) }
+                .buttonStyle(.plain).foregroundStyle(PanelPalette.secondaryText.opacity(0.7))
+                .help("重新显示建议，⌘J 查看详情").accessibilityLabel("重新显示建议")
         } else if suggestions.isEmpty, model.contextSuggestionsLoading {
             Text(model.contextSuggestionProgress ?? "正在生成建议…").foregroundStyle(PanelPalette.secondaryText)
         } else {

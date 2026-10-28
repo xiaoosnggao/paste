@@ -56,6 +56,12 @@ extension AppModel {
 
     /// The strip under the toolbar has a fixed height and is shown whenever suggestions can run,
     /// regardless of loading state, so the panel never resizes while results arrive.
+    /// After dismissal the strip keeps its slot and shows only a quiet "✨ ⌘J 建议" hint.
+    var suggestionStripShowsHint: Bool {
+        !selectedIDs.isEmpty && contextSuggestionKey == nil && !contextSuggestionsLoading
+            && displayedSuggestions.isEmpty && contextSuggestionsError == nil
+    }
+
     var suggestionStripAvailable: Bool {
         toolConfiguration.contextSuggestionsEnabled && (!isDemo || suggestionOperationsInjected) && contextSuggestionService != nil
     }
