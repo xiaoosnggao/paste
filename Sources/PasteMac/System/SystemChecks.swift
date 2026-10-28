@@ -126,7 +126,9 @@ enum SystemChecks {
             try check(nativeSurface.material == .liquidGlass, "native Liquid Glass surface missing")
             let glass = nativeSurface.subviews.first as? NSGlassEffectView
             try check(glass?.contentView != nil && glass?.tintColor != nil, "glass lost its hosted content or graphite tint")
+            #if compiler(>=6.4)
             if #available(macOS 27.0, *) { try check(glass?.effectIsInteractive == false, "window glass must not flash when clicking empty space") }
+            #endif
         } else {
             try check(nativeSurface.material == .visualEffect, "older macOS blur fallback missing")
         }
