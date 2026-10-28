@@ -22,8 +22,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private var statusItem: NSStatusItem!
     private var settingsWindow: NSWindow?
     private var accessibilityGuide: AccessibilityGuide?
-    private var editorWindow: NSWindow?
-    private var intelligenceWindow: NSWindow?
     private var suggestionResultWindow: NSWindow?
     private var historyManagementWindow: NSWindow?
     private var mcpService: MCPService!
@@ -82,7 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             self.accessibilityGuide?.show()
         }
         model.onEditor = { [weak self] item in self?.showEditor(item) }
-        model.onEditorClose = { [weak self] in self?.editorWindow?.close() }
+        model.onEditorClose = { [weak self] in self?.model.cancelPanelEditor() }
         model.onPreview = { [weak self] item in self?.showPreview(item) }
         model.onIntelligence = { [weak self] item in self?.showIntelligence(item) }
         model.onStack = { [weak self] in self?.showStack() }
@@ -304,12 +302,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         NSApp.activate()
         settingsWindow?.makeKeyAndOrderFront(nil)
     }
+    /// Editing opens the panel's edit page; a new text opens it without a card.
     private func showEditor(_ item: ClipItem?) {
-        editorWindow?.close()
-        model.retainHistory(item.map { [$0.id] } ?? [], for: "editor")
-        editorWindow = window(title: item == nil ? "新建文本" : "编辑卡片", size: .init(width: 560, height: 420), view: EditorView(model: model, item: item))
-        NSApp.activate()
-        editorWindow?.makeKeyAndOrderFront(nil)
+        if let item, model.selectedIDs.isEmpty, model.visibleItems.contains(where: { $0.id == item.id }) { model.select(item) }
+        model.openPanelEditor(item)
     }
     /// Preview opens in the panel's detail layer instead of a window.
     private func showPreview(_ item: ClipItem) {
@@ -453,6 +449,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let textEditing = panel.firstResponder is NSTextView
         if event.isARepeat && !textEditing && ([36, 76, 49].contains(event.keyCode) || flags.contains(.command)) { return true }
+        if let page = model.panelDetail?.page,
+           let action = PanelDetailKey.resolve(page: page, keyCode: event.keyCode, flags: flags,
+                                               key: event.charactersIgnoringModifiers?.lowercased(),
+                                               textEditing: textEditing,
+                                               composing: (panel.firstResponder as? NSTextView)?.hasMarkedText() == true,
+                                               fieldEditor: (panel.firstResponder as? NSTextView)?.isFieldEditor == true) {
+            guard !event.isARepeat else { return true }
+            switch action {
+            case .save: model.savePanelEditor()
+            case .translate: model.translateToolInput()
+            case .retry: model.retryToolOperation()
+            case .ignore: break
+            }
+            return true
+        }
         if event.keyCode == 53 {
             let editor = panel.firstResponder as? NSTextView
             switch PanelEscapeAction.resolve(detailOpen: model.panelDetail != nil, textEditing: textEditing,
@@ -510,12 +521,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
 
     @objc private func openPanel() { showPanel() }
+    /// Smart actions open the panel's smart page.
     private func showIntelligence(_ item: ClipItem) {
-        intelligenceWindow?.close()
-        model.retainHistory([item.id], for: "intelligence")
-        intelligenceWindow = window(title: "智能处理", size: .init(width: 620, height: 540), view: IntelligenceView(model: model, item: item))
-        NSApp.activate()
-        intelligenceWindow?.makeKeyAndOrderFront(nil)
+        if model.selectedIDs.isEmpty, model.visibleItems.contains(where: { $0.id == item.id }) { model.select(item) }
+        model.openPanelDetail(.intelligence, itemID: item.id)
     }
     func application(_ application: NSApplication, open urls: [URL]) {
         if let url = urls.first { AppIntegration.shared.receive(url) }
@@ -563,8 +572,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         toolWindowPosition.save(toolWindow.frame.origin)
     }
     func windowWillClose(_ notification: Notification) {
-        if notification.object as? NSWindow === editorWindow { model.releaseHistory(for: "editor") }
-        if notification.object as? NSWindow === intelligenceWindow { model.releaseHistory(for: "intelligence") }
         if notification.object as? NSWindow === suggestionResultWindow { model.releaseHistory(for: "suggestion") }
         if notification.object as? NSWindow === toolWindow { model.toolSessionActive = false; model.cancelToolOperation() }
     }
@@ -579,6 +586,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private func showTools() {
         guard !screenshotCoordinator.isCapturing else { return }
         model.toolSessionActive = true
+        // Started from the panel (or while its translate page is open): stay in the panel.
+        if panelPresented, model.toolsHostedInPanel || model.panelDetail?.page == .translate {
+            model.toolsHostedInPanel = false
+            model.openPanelDetail(.translate, itemID: model.toolItemID)
+            return
+        }
         hidePanel()
         if toolWindow == nil {
             let frame = NSRect(x: 0, y: 0, width: 640, height: 480)
