@@ -29,15 +29,6 @@ enum SnapshotRenderer {
                 model.isSearchVisible = true
                 try await render("panel-search-\(tag)", NSSize(width: screen.width, height: PanelPresentation.baseHeight), radius: DesignTokens.Radius.panel, PastePanelView(model: model))
                 model.isSearchVisible = false
-                // With a detail window open the panel keeps its height and its own material.
-                let text = model.visibleItems.first { $0.kind == .text }!
-                model.select(text)
-                model.openPanelDetail(.intelligence, itemID: text.id)
-                try await snapshot(PastePanelView(model: model), size: NSSize(width: screen.width, height: PanelPresentation.baseHeight),
-                                   radius: DesignTokens.Radius.panel, appearance: appearance,
-                                   to: directory.appendingPathComponent("panel-detail-open-native-\(tag)-\(suffix).png"), reduceTransparency: false)
-                count += 1
-                model.closePanelDetail()
             }
             let model = makeModel()
             // 编辑, 翻译 and 智能 are standalone windows above the panel.
@@ -54,9 +45,6 @@ enum SnapshotRenderer {
                 model.closePanelDetail()
                 model.openPanelDetail(.intelligence, itemID: text.id)
                 try await render("window-intelligence", windowSize, PanelDetailWindowView(model: model))
-                try await snapshot(PanelDetailWindowView(model: model), size: windowSize, radius: DesignTokens.Radius.window, appearance: appearance,
-                                   to: directory.appendingPathComponent("window-intelligence-native-\(suffix).png"), reduceTransparency: false)
-                count += 1
                 model.closePanelDetail()
             }
             for kind in [ClipKind.text, .image, .file, .link] {
