@@ -100,7 +100,8 @@ struct WindowScaffold<Accessory: View, Content: View, Footer: View>: View {
         }
         .padding(.leading, chrome == .window ? WindowMetrics.trafficLightInset : WindowMetrics.contentPadding)
         .padding(.trailing, chrome == .window ? DesignTokens.Space.md : WindowMetrics.contentPadding)
-        .frame(height: WindowMetrics.titleBarHeight)
+        // Windows: center the toolbar on the traffic lights, not on the 44 pt strip.
+        .frame(height: chrome == .window ? PopupMetrics.trafficLightCenterY * 2 : WindowMetrics.titleBarHeight)
         .overlay {
             if chrome == .window, let caption, !caption.isEmpty {
                 Text(caption).font(.scaled(.caption, weight: .medium)).foregroundStyle(PanelPalette.secondaryText)
@@ -108,6 +109,7 @@ struct WindowScaffold<Accessory: View, Content: View, Footer: View>: View {
                     .padding(.horizontal, 140).allowsHitTesting(false)
             }
         }
+        .frame(height: WindowMetrics.titleBarHeight, alignment: .top)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(title)
     }

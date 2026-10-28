@@ -79,7 +79,7 @@ struct PreviewView: View {
                 PopupToolbarButton(symbol: "chevron.right", label: "下一张 (→)") { model.movePreview(1) }
                     .disabled(index.map { $0 >= items.count - 1 } ?? true)
             }
-            PopupGlassToolbar { moreMenu(value) }
+            PopupGlassCircle { moreMenu(value) }
         }
     }
     /// Everything beyond paste and copy: the panel pages, recognition and image or file tools.
@@ -121,7 +121,10 @@ struct PreviewView: View {
         } label: {
             PopupToolbarGlyph(symbol: "ellipsis")
         }
-        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().focusEffectDisabled()
+        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
+        .tint(PanelPalette.text).foregroundStyle(PanelPalette.text)
+        .frame(width: PopupMetrics.glassControlHeight, height: PopupMetrics.glassControlHeight)
+        .focusEffectDisabled()
         .help("更多操作").accessibilityLabel("更多操作")
     }
     private func footerNote(_ value: ClipItem) -> String {
@@ -190,8 +193,10 @@ struct PreviewView: View {
                                 .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
                         }
                         Spacer(minLength: DesignTokens.Space.sm)
-                        Button("在 Finder 中显示") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) }
-                            .controlSize(.small)
+                        Button { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) } label: {
+                            Label("在 Finder 中显示", systemImage: "folder")
+                        }
+                        .popupSecondaryStyle().focusEffectDisabled()
                     }
                     .padding(.horizontal, DesignTokens.Space.md).padding(.vertical, DesignTokens.Space.sm)
                     .background(PanelPalette.raised, in: RoundedRectangle(cornerRadius: DesignTokens.Radius.md))

@@ -17,7 +17,7 @@ struct PreviewSuggestionsSection: View {
                 }
             }
             if model.suggestionStripShowsHint {
-                Button("显示建议", action: model.retryContextSuggestions).buttonStyle(.plain).font(.scaled(.caption)).foregroundStyle(PanelPalette.accent)
+                SuggestionsPromptCard(action: model.retryContextSuggestions)
             } else {
                 if model.selectedIDs.count > 1, let id = model.previewItemID, model.selectedIDs.contains(id) { multiSummary }
                 if let error = model.contextSuggestionsError {
@@ -122,5 +122,37 @@ extension AppModel {
         if selectedIDs.count > 1 { return "已选 \(selectedIDs.count) 项 → \(target)" }
         let source = selectedItems.first?.sourceName ?? ""
         return "\(source.isEmpty ? "未知来源" : source) → \(target)"
+    }
+}
+
+/// Collapsed suggestions (images, files, or before any request): a full-width card that
+/// explains what it does instead of a lone link.
+private struct SuggestionsPromptCard: View {
+    let action: () -> Void
+    @State private var hovering = false
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: DesignTokens.Space.md) {
+                Image(systemName: "wand.and.sparkles")
+                    .font(.scaled(.label, weight: .semibold)).foregroundStyle(PanelPalette.accent)
+                    .frame(width: 32, height: 32)
+                    .background(Circle().fill(PanelPalette.accent.opacity(0.14)))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("生成建议").font(.scaled(.label, weight: .semibold)).foregroundStyle(PanelPalette.text)
+                    Text("按内容和要粘贴到的应用推荐下一步").font(.scaled(.caption)).foregroundStyle(PanelPalette.secondaryText)
+                        .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right").font(.scaled(.caption, weight: .semibold)).foregroundStyle(PanelPalette.secondaryText)
+            }
+            .padding(DesignTokens.Space.md)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(hovering ? PanelPalette.hover : PanelPalette.surface, in: RoundedRectangle(cornerRadius: DesignTokens.Radius.md, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: DesignTokens.Radius.md, style: .continuous).strokeBorder(Color.primary.opacity(0.08), lineWidth: 1))
+            .contentShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.md))
+        }
+        .buttonStyle(.plain).focusEffectDisabled()
+        .onHover { hovering = $0 }
+        .accessibilityLabel("生成建议")
     }
 }

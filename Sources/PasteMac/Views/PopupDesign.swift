@@ -14,7 +14,11 @@ enum PopupMetrics {
     /// item kind so the column sits at the same x and width for text and images.
     static let sideColumnWidth: CGFloat = 300
     /// Diameter of a title-bar glass button.
-    static let glassButtonSize: CGFloat = 30
+    static let glassButtonSize: CGFloat = 24
+    /// Outer height of a title-bar glass control (pill height = circle diameter).
+    static var glassControlHeight: CGFloat { glassButtonSize + 4 }
+    /// Vertical center of the traffic lights in a full-size-content window.
+    static let trafficLightCenterY: CGFloat = 16
 }
 
 /// Title-bar toolbar controls in the macOS 26 Liquid Glass style: buttons sit on one
@@ -23,7 +27,7 @@ struct PopupGlassToolbar<Content: View>: View {
     @ViewBuilder let content: Content
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     var body: some View {
-        let row = HStack(spacing: 0) { content }.padding(.horizontal, 2).frame(height: PopupMetrics.glassButtonSize + 4)
+        let row = HStack(spacing: 0) { content }.padding(.horizontal, 2).frame(height: PopupMetrics.glassControlHeight)
         Group {
             if #available(macOS 26.0, *), !reduceTransparency {
                 GlassEffectContainer { row.glassEffect(.regular, in: Capsule()) }
@@ -32,6 +36,26 @@ struct PopupGlassToolbar<Content: View>: View {
                     .overlay(Capsule().strokeBorder(Color.primary.opacity(0.08), lineWidth: 1))
             }
         }
+        .fixedSize()
+    }
+}
+
+/// A single round glass control (e.g. the ⋯ menu): a true circle, the same diameter as the pill.
+struct PopupGlassCircle<Content: View>: View {
+    @ViewBuilder let content: Content
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    var body: some View {
+        let d = PopupMetrics.glassControlHeight
+        let core = content.frame(width: d, height: d).contentShape(Circle()).clipShape(Circle())
+        Group {
+            if #available(macOS 26.0, *), !reduceTransparency {
+                GlassEffectContainer { core.glassEffect(.regular, in: Circle()) }
+            } else {
+                core.background(.thinMaterial, in: Circle())
+                    .overlay(Circle().strokeBorder(Color.primary.opacity(0.08), lineWidth: 1))
+            }
+        }
+        .frame(width: d, height: d)
         .fixedSize()
     }
 }
