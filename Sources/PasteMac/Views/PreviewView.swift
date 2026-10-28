@@ -193,7 +193,7 @@ struct PreviewView: View {
                             .controlSize(.small)
                     }
                     .padding(.horizontal, DesignTokens.Space.md).padding(.vertical, DesignTokens.Space.sm)
-                    .background(PanelPalette.surface.opacity(0.6), in: RoundedRectangle(cornerRadius: DesignTokens.Radius.md))
+                    .background(PanelPalette.raised, in: RoundedRectangle(cornerRadius: DesignTokens.Radius.md))
                 }
             }
         }

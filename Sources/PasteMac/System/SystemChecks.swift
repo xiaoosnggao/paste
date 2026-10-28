@@ -152,6 +152,9 @@ enum SystemChecks {
                 try check(dark ? (tint?.alphaComponent ?? 0) >= 0.75 : (tint?.alphaComponent ?? 1) < 0.4,
                           "glass tint lost dark contrast protection or light translucency")
             }
+            let tintAlpha = nativeSurface.tintLayerColor?.alphaComponent ?? 0
+            try check(tintAlpha >= (dark ? PanelGlassSurface.tintAlpha.dark : PanelGlassSurface.tintAlpha.light) - 0.001,
+                      "panel background lets the windows behind it show through")
         }
         let upper = NSRect(x: 0, y: 1080, width: 1920, height: 1080)
         let lower = NSRect(x: 0, y: 0, width: 1920, height: 1080)
