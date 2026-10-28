@@ -327,6 +327,7 @@ enum SystemChecks {
         count += try PermissionGuideChecks.run()
         count += try await PermissionRepairChecks.run()
         count += try ToolWindowPlacementChecks.run()
+        count += try AuxiliaryWindowPlacementChecks.run()
         count += try await ProviderChecks.run()
         count += try await SystemToolsRuntimeChecks.run()
         if ProcessInfo.processInfo.environment["PASTE_PERFORMANCE_CHECKS"] == "1" {
