@@ -209,10 +209,10 @@ private struct ActionTile: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(DesignTokens.Space.md)
             .background(RoundedRectangle(cornerRadius: DesignTokens.Radius.lg, style: .continuous)
-                .fill(Color(nsColor: .textBackgroundColor).opacity(scheme == .dark ? (hovering ? 0.45 : 0.30) : (hovering ? 1 : 0.78))))
+                .fill(Color(nsColor: .textBackgroundColor).opacity(scheme == .dark ? (hovering ? 0.45 : 0.30) : (hovering ? 1 : 0.78)))
+                .shadow(color: .black.opacity(scheme == .dark ? 0.2 : 0.05), radius: 6, y: 2))
             .overlay(RoundedRectangle(cornerRadius: DesignTokens.Radius.lg, style: .continuous)
                 .strokeBorder(hovering ? PanelPalette.accent.opacity(0.4) : Color.primary.opacity(0.06), lineWidth: 1))
-            .shadow(color: .black.opacity(scheme == .dark ? 0.2 : 0.05), radius: 6, y: 2)
             .contentShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.lg))
             .opacity(tile.enabled ? 1 : 0.45)
         }

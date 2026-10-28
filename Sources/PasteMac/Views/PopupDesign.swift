@@ -31,13 +31,14 @@ private struct PopupCard: ViewModifier {
             .padding(padding)
             .background {
                 shape.fill(Color(nsColor: .textBackgroundColor).opacity(reduceTransparency ? 1 : (scheme == .dark ? 0.32 : 0.78)))
+                    // Shadow on the card shape only, so text inside stays crisp.
+                    .shadow(color: .black.opacity(scheme == .dark ? 0.25 : 0.06), radius: 10, y: 3)
                 if let tint { shape.fill(tint.opacity(scheme == .dark ? 0.10 : 0.06)) }
             }
             .overlay {
                 shape.strokeBorder(focused ? PanelPalette.accent.opacity(0.55) : Color.primary.opacity(scheme == .dark ? 0.08 : 0.05),
                                    lineWidth: focused ? 1.5 : 1)
             }
-            .shadow(color: .black.opacity(scheme == .dark ? 0.25 : 0.06), radius: 10, y: 3)
     }
 }
 
