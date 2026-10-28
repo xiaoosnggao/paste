@@ -45,7 +45,6 @@ struct PastePanelView: View {
         .onChange(of: model.isSearchVisible) { _, visible in searchFocused = visible }
         .onChange(of: model.queryString) { _, _ in model.selectFirstIfNeeded() }
         .onChange(of: model.filter) { _, _ in model.selectFirstIfNeeded() }
-        .sheet(item: $classificationBoard) { board in CategoryClassificationSettings(model: model, board: board) }
         .onChange(of: model.selectedPinboardID) { _, _ in model.selectFirstIfNeeded() }
         .confirmationDialog(pendingBoardDeletion.map { "删除收藏夹“\($0.name)”？" } ?? "删除收藏夹？",
                             isPresented: Binding(get: { pendingBoardDeletion != nil }, set: { if !$0 { pendingBoardDeletion = nil } }),
@@ -219,6 +218,11 @@ struct PastePanelView: View {
                         .modifier(PasteboardInputSurface(focused: boardNameFocused == board.id))
                 } else {
                     boardPill(board.name, id: board.id, color: Color(hex: board.colorHex))
+                        .popover(isPresented: Binding(get: { classificationBoard?.id == board.id },
+                                                      set: { if !$0, classificationBoard?.id == board.id { classificationBoard = nil } }),
+                                 arrowEdge: .top) {
+                            CategoryClassificationSettings(model: model, board: board) { classificationBoard = nil }
+                        }
                         .contextMenu {
                             Button("重命名") { beginRename(board.id, name: board.name) }
                             Button("自动归类设置…") { classificationBoard = board }
