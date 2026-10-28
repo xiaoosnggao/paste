@@ -350,10 +350,30 @@ struct PastePanelView: View {
         .accessibilityLabel("更多操作")
     }
 
+    /// Card context menu, grouped: paste, view and tools, pinboards, delete.
+    /// Recognition and translation sit in one submenu once there is more than
+    /// a plain 翻译 to offer; every item keeps its condition and action.
     @ViewBuilder private func cardMenu(_ item: ClipItem) -> some View {
         Button("粘贴") { ensureSelection(item); model.activateSelected() }
         Button("粘贴为纯文本") { ensureSelection(item); model.activateSelected(plainText: true) }
         Button("复制") { ensureSelection(item); model.copySelected() }
+        Button("添加到连续粘贴") { ensureSelection(item); model.setStack(model.selectedItems); model.showStack() }
+        Divider()
+        Button("预览") { model.preview(item) }
+        Button("编辑") { model.edit(item) }.disabled(item.kind == .image || item.kind == .file)
+        if item.kind != .image, item.enrichment == nil {
+            if !item.text.isEmpty { Button("翻译") { hostedTool(item) { model.translateItem(item) } } }
+        } else {
+            Menu("识别与翻译") { toolMenu(item) }
+        }
+        if item.kind == .image {
+            Menu("旋转") {
+                Button("向左旋转") { model.rotateImage(item, clockwise: false) }
+                Button("向右旋转") { model.rotateImage(item, clockwise: true) }
+            }
+        }
+        if item.kind == .file || item.kind == .link { Button("打开") { model.openItem(item) } }
+        Divider()
         if let candidates = model.suggestedCategories[item.id], !candidates.isEmpty {
             Menu("建议分类") {
                 ForEach(model.snapshot.pinboards.filter { candidates.contains($0.id) }) { board in
@@ -368,23 +388,18 @@ struct PastePanelView: View {
         }
         if model.selectedPinboardID != nil { Button("从收藏夹移除") { ensureSelection(item); model.unpinSelection() } }
         Divider()
-        Button("编辑") { model.edit(item) }.disabled(item.kind == .image || item.kind == .file)
-        Button("预览") { model.preview(item) }
+        Button("删除", role: .destructive) { ensureSelection(item); model.deleteSelected() }
+    }
+
+    @ViewBuilder private func toolMenu(_ item: ClipItem) -> some View {
         if item.enrichment != nil { Button("识别与翻译详情") { hostedTool(item) { model.showToolItem(item) } } }
         if item.kind == .image {
             Button("识别文字") { hostedTool(item) { model.recognizeItem(item) } }
             Button("识别并翻译") { hostedTool(item) { model.recognizeItem(item, translateAfter: true) } }
         } else if !item.text.isEmpty { Button("翻译") { hostedTool(item) { model.translateItem(item) } } }
+        if item.enrichment?.ocr != nil || item.enrichment?.translation != nil { Divider() }
         if let ocr = item.enrichment?.ocr { Button("复制识别文字") { model.copyToolText(ocr.text) } }
         if let translation = item.enrichment?.translation { Button("复制译文") { model.copyToolText(translation.translatedText) } }
-        if item.kind == .image {
-            Button("向左旋转") { model.rotateImage(item, clockwise: false) }
-            Button("向右旋转") { model.rotateImage(item, clockwise: true) }
-        }
-        if item.kind == .file || item.kind == .link { Button("打开") { model.openItem(item) } }
-        Button("添加到连续粘贴") { ensureSelection(item); model.setStack(model.selectedItems); model.showStack() }
-        Divider()
-        Button("删除", role: .destructive) { ensureSelection(item); model.deleteSelected() }
     }
 
     /// Recognition and translation from the menu show on the panel's translate page.
