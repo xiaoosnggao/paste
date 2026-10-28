@@ -49,10 +49,9 @@ struct EditorView: View {
                     .accessibilityLabel("有未保存的修改")
             }
             Spacer()
-            Text("⌘S 保存 · ↩ 换行 · Esc 收起").font(.scaled(.caption)).foregroundStyle(PanelPalette.secondaryText)
             Button("取消") { model.cancelPanelEditor() }
             Button("保存") { model.savePanelEditor() }
-                .buttonStyle(.borderedProminent).tint(PanelPalette.accent).foregroundStyle(PanelPalette.onAccent)
+                .primaryActionStyle()
                 .disabled(value.string.isEmpty)
                 .help("保存 (⌘S)")
         }
@@ -66,7 +65,6 @@ struct EditorView: View {
             FormatButton(symbol: "italic", label: "斜体") { editor.toggleFontTrait(.italicFontMask) }
             FormatButton(symbol: "underline", label: "下划线") { editor.toggleUnderline() }
             Spacer()
-            Text("富文本").font(.scaled(.caption)).foregroundStyle(PanelPalette.secondaryText)
         }
         .padding(.horizontal, DesignTokens.Space.sm)
         .frame(height: 32)

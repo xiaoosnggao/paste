@@ -513,7 +513,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             if event.window === self.panel { self.closeUnpinnedTools() }
             return event
         }
-        // Preview window: ← → switch cards, Space closes like Quick Look. Esc and Return use its buttons.
+        // Preview window: ← → switch cards, Space and Esc close it. Return uses its 粘贴 button.
         previewKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, let preview = self.previewWindow, event.window === preview else { return event }
             if let text = preview.firstResponder as? NSTextView, text.hasMarkedText() || text.isEditable { return event }
@@ -521,7 +521,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             switch event.keyCode {
             case 123: self.model.movePreview(-1); return nil
             case 124: self.model.movePreview(1); return nil
-            case 49: if !event.isARepeat { self.model.closePreview() }; return nil
+            case 49, 53: if !event.isARepeat { self.model.closePreview() }; return nil
             default: return event
             }
         }

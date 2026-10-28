@@ -19,8 +19,7 @@ struct IntelligenceView: View {
     var body: some View {
         Group {
             if let item = current {
-                PanelDetailScaffold(model: model, item: item, page: .intelligence, title: "智能处理",
-                                    subtitle: item.title.isEmpty ? String(item.text.prefix(80)) : item.title) {
+                PanelDetailScaffold(model: model, item: item, page: .intelligence, title: "智能处理") {
                     HStack(alignment: .top, spacing: DesignTokens.Space.lg) {
                         ScrollView { actions.frame(maxWidth: .infinity, alignment: .leading) }
                             .scrollIndicators(.automatic)
@@ -35,7 +34,6 @@ struct IntelligenceView: View {
                     ContentUnavailableView("此卡片已删除", systemImage: "trash").frame(maxWidth: .infinity, maxHeight: .infinity)
                 } footer: {
                     Spacer()
-                    Button("关闭") { model.closePanelDetail() }
                 }
             }
         }
@@ -48,13 +46,17 @@ struct IntelligenceView: View {
                     WindowSectionHeader("Apple 智能")
                     Spacer()
                     Button("刷新状态", systemImage: "arrow.clockwise") { availability = IntelligenceService.availability }
-                        .labelStyle(.titleAndIcon).buttonStyle(.borderless).controlSize(.small).disabled(busy)
+                        .labelStyle(.iconOnly).buttonStyle(.borderless).controlSize(.small).disabled(busy)
+                        .help("刷新 Apple 智能状态")
                 }
                 Text(availability.message).font(.scaled(.caption)).foregroundStyle(PanelPalette.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
-                HStack(spacing: DesignTokens.Space.sm) {
-                    ForEach(IntelligenceAction.allCases) { action in
-                        Button(action.rawValue) { startAI(action) }.disabled(busy || !availability.available || tooLong)
+                // Unavailable actions are hidden; the message above says why.
+                if availability.available {
+                    HStack(spacing: DesignTokens.Space.sm) {
+                        ForEach(IntelligenceAction.allCases) { action in
+                            Button(action.rawValue) { startAI(action) }.disabled(busy || tooLong)
+                        }
                     }
                 }
                 if tooLong {
@@ -94,8 +96,6 @@ struct IntelligenceView: View {
         Spacer()
         if busy {
             Button("取消") { task?.cancel(); task = nil; operation = UUID(); busy = false }
-        } else {
-            Button("关闭") { model.closePanelDetail() }
         }
         if !result.isEmpty {
             Button("保存结果") {
@@ -103,7 +103,7 @@ struct IntelligenceView: View {
                 else { error = model.statusMessage ?? "保存失败。" }
             }.disabled(busy)
             Button("复制结果") { copyResult() }
-                .buttonStyle(.borderedProminent).tint(PanelPalette.accent).foregroundStyle(PanelPalette.onAccent)
+                .primaryActionStyle()
                 .disabled(busy)
         }
     }

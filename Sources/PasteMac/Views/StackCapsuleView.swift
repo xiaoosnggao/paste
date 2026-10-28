@@ -70,8 +70,7 @@ struct StackCapsuleView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             Button("粘贴下一项", action: model.pasteNextStack)
-                .buttonStyle(.borderedProminent).controlSize(.small)
-                .tint(PanelPalette.accent).foregroundStyle(PanelPalette.onAccent)
+                .primaryActionStyle().controlSize(.small)
                 .disabled(model.stackItems.isEmpty)
                 .help("在目标应用中放置光标，再点击“粘贴下一项”。粘贴后自动移除该卡片。")
             iconButton(expanded ? "chevron.up" : "chevron.down", help: expanded ? "收起列表" : "展开列表") { expanded.toggle() }
@@ -105,9 +104,6 @@ struct StackCapsuleView: View {
                 }
             }
             .frame(height: Self.listHeight(rows: model.stackItems.count))
-            Text("在目标应用中放置光标，再点击“粘贴下一项”。粘贴后自动移除该卡片。")
-                .font(.scaled(.micro)).foregroundStyle(PanelPalette.secondaryText)
-                .fixedSize(horizontal: false, vertical: true)
             HStack {
                 Toggle("倒序粘贴", isOn: Binding(get: { model.stackReversed }, set: model.setStackReversed))
                     .toggleStyle(.checkbox).controlSize(.small)
