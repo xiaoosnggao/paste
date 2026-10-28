@@ -16,7 +16,14 @@ final class AppModel: ObservableObject {
     @Published var usesRecommendations = false { didSet { cachedVisibleItems = nil } }
     private var cachedVisibleItems: [ClipItem]?
     private var cachedRecommendationTarget: String?
-    @Published var statusMessage: String?
+    /// The panel's bottom notice. Confirmations and info clear themselves.
+    @Published var notice: PanelNotice? { didSet { scheduleNoticeDismissal() } }
+    private var noticeDismissal: Task<Void, Never>?
+    /// Compatibility shim for call sites that still read or write plain text.
+    var statusMessage: String? {
+        get { notice?.text }
+        set { notice = newValue.map(PanelNotice.init(legacyMessage:)) }
+    }
     @Published var pasteIssue: PasteIssue?
     @Published private(set) var directPastePermissionGranted = false
     @Published private(set) var hasCheckedDirectPastePermission = false
@@ -286,7 +293,7 @@ final class AppModel: ObservableObject {
         do { try bridge.write(items, plainText: plainText || snapshot.preferences.alwaysPlainText) }
         catch { statusMessage = error.localizedDescription; completion?(false); return }
         guard snapshot.preferences.pasteToFrontmost else {
-            statusMessage = "已复制"
+            notice = .copied
             onClose?()
             completion?(true)
             return
@@ -302,7 +309,7 @@ final class AppModel: ObservableObject {
             isPasting = false
             if !dispatched, pasteEngine.lastIssue?.usesCopyOnlyFallback == true {
                 // The clip is already written. Missing destinations are normal copy-only use.
-                statusMessage = "已复制"
+                notice = .copied
                 if !panelClosed { onClose?() }
             } else if !dispatched {
                 pasteIssue = pasteEngine.lastIssue
@@ -319,10 +326,20 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private func scheduleNoticeDismissal() {
+        noticeDismissal?.cancel()
+        guard let current = notice, let delay = current.autoDismissDelay else { noticeDismissal = nil; return }
+        noticeDismissal = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled, let self, self.notice == current else { return }
+            self.notice = nil
+        }
+    }
+
     func copySelected(plainText: Bool = false) {
         guard contextSuggestionApplyingID == nil, !isPasting else { return }
         selectFirstIfNeeded()
-        do { try bridge.write(materializedItems(selectedItems), plainText: plainText); statusMessage = "已复制" }
+        do { try bridge.write(materializedItems(selectedItems), plainText: plainText); notice = .copied }
         catch { statusMessage = error.localizedDescription }
     }
 

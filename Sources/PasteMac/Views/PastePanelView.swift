@@ -93,22 +93,40 @@ struct PastePanelView: View {
             }
     }
 
-    @ViewBuilder private var statusNotice: some View {
-        if model.storageError != nil || model.pasteFailureText != nil || (model.statusMessage != nil && model.statusMessage != "已复制") {
-            HStack(spacing: 8) {
-                Text(model.storageError ?? model.pasteFailureText ?? model.statusMessage ?? "")
-                    .font(.system(size: 11)).lineLimit(2)
-                if model.storageError != nil {
-                    Button("重试保存", action: model.retrySave).buttonStyle(.plain).foregroundStyle(Color.accentColor)
-                } else {
-                    Button { model.statusMessage = nil; model.pasteIssue = nil } label: { Image(systemName: "xmark") }
-                        .buttonStyle(.plain).accessibilityLabel("关闭提示")
-                }
+    /// The persistent failure if there is one, otherwise the transient notice.
+    private var visibleNotice: PanelNotice? {
+        if let error = model.storageError ?? model.pasteFailureText { return .error(error) }
+        return model.notice
+    }
+
+    private var statusNotice: some View {
+        ZStack {
+            if let notice = visibleNotice {
+                noticeBanner(notice)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
-            .padding(.horizontal, 12).padding(.vertical, 8)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
-            .padding(.horizontal, 22).padding(.bottom, 10)
         }
+        .animation(.easeOut(duration: 0.2), value: visibleNotice)
+    }
+
+    private func noticeBanner(_ notice: PanelNotice) -> some View {
+        HStack(spacing: 8) {
+            if notice == .copied {
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).accessibilityHidden(true)
+            } else if case .error = notice {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange).accessibilityHidden(true)
+            }
+            Text(notice.text).font(.system(size: 11)).lineLimit(2)
+            if model.storageError != nil {
+                Button("重试保存", action: model.retrySave).buttonStyle(.plain).foregroundStyle(Color.accentColor)
+            } else if notice != .copied {
+                Button { model.notice = nil; model.pasteIssue = nil } label: { Image(systemName: "xmark") }
+                    .buttonStyle(.plain).accessibilityLabel("关闭提示")
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .padding(.horizontal, 22).padding(.bottom, 10)
     }
 
     private var toolbar: some View {
