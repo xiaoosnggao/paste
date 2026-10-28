@@ -37,13 +37,15 @@ enum ContextSuggestionsChecks {
         for extra in [["detail": " \n "], ["detail": String(repeating: "长", count: 81)], ["unexpected": "field"]] {
             let invalidDetails = rows.enumerated().map { index, row in index == 0 ? row.merging(extra, uniquingKeysWith: { _, new in new }) : row }
             try fixture(encoded(invalidDetails))
-            try await failure(.invalidResponse) { _ = try await service.suggest(input: input, service: config) }
+            let lenient = try await service.suggest(input: input, service: config)
+            try check(lenient.count == 3 && lenient[0].detail == rows[0]["instruction"], "bad detail or extra field keeps the row")
         }
         try fixture(encoded(rows))
         _ = try await service.suggest(input: input, service: config)
         let body = try SuggestionFixtureProtocol.body()
         let messages = body["messages"] as? [[String: Any]] ?? []
-        try check(messages.count == 2 && body["tools"] == nil && body["stream"] as? Bool == false, "only two messages; no tools or streaming")
+        try check(messages.count == 2 && body["tools"] == nil && body["stream"] as? Bool == true, "only two messages; no tools; streamed")
+        try check((body["max_tokens"] as? Int ?? 9999) <= 400, "slim suggestion budget")
         let user = messages.last?["content"] as? String ?? ""
         let payload = try JSONSerialization.jsonObject(with: Data(user.utf8)) as? [String: Any]
         try check(payload?["text"] as? String == input.text && payload?["sourceName"] as? String == "VS Code" && payload?["targetName"] as? String == "Lark", "selected text and known apps included")
@@ -60,9 +62,34 @@ enum ContextSuggestionsChecks {
         try check(injectionMessages?.first?["content"] as? String == system, "input never alters system prompt")
         try fixture(encoded(rows + [rows[0]]))
         try check(try await service.suggest(input: input, service: config).count == 3, "duplicate titles removed")
-        for invalidRows in [Array(rows.prefix(2)), Array(repeating: rows[0], count: 6), rows + [["title": "第四", "instruction": "x"], ["title": "第五", "instruction": "x"], ["title": "第六", "instruction": "x"]], [["title": "", "instruction": "x"]] + rows, [["title": String(repeating: "长", count: 33), "instruction": "x"]] + rows, [["title": "too long", "instruction": String(repeating: "x", count: 1001)]] + rows] {
-            try fixture(encoded(invalidRows)); try await failure(.invalidResponse) { _ = try await service.suggest(input: input, service: config) }
+        let lenientCases: [([[String: String]], Int)] = [(Array(rows.prefix(1)), 1), (Array(rows.prefix(2)), 2), (Array(repeating: rows[0], count: 6), 1),
+            (rows + [["title": "第四", "instruction": "x"], ["title": "第五", "instruction": "x"], ["title": "第六", "instruction": "x"]], 5),
+            ([["title": "", "instruction": "x"]] + rows, 3), ([["title": String(repeating: "长", count: 33), "instruction": "x"]] + rows, 3),
+            ([["title": "too long", "instruction": String(repeating: "x", count: 1001)]] + rows, 3)]
+        for (lenientRows, expected) in lenientCases {
+            try fixture(encoded(lenientRows))
+            try check(try await service.suggest(input: input, service: config).count == expected, "lenient parsing keeps 1–5 usable rows")
         }
+        try fixture("{\"title\":\"翻译成英文\",\"detail\":\"译成自然的英文\",\"action\":\"translate\"}\n{\"title\":\"总结要点\",\"action\":\"summarize\"}\nnot json\n")
+        let jsonl = try await service.suggest(input: input, service: config)
+        try check(jsonl.count == 2 && jsonl[0].instruction.hasPrefix("Translate") && jsonl[0].instruction.contains("翻译成英文"), "JSONL rows build execution instructions from action templates")
+        let partial = ContextSuggestionsService.partialSuggestions("{\"title\":\"一\",\"action\":\"fix\"}\n{\"title\":\"二\",\"act")
+        try check(partial.map(\.title) == ["一"], "streaming parser emits only complete lines")
+        var accumulator = ChatStreamAccumulator()
+        for line in ["data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"title\\\":\"}}]}", "", "data: {\"choices\":[{\"delta\":{\"content\":\"\\\"a\\\"}\\n\"},\"finish_reason\":\"stop\"}]}", "data: [DONE]"] {
+            try accumulator.feed(line: line)
+        }
+        try check(accumulator.content == "{\"title\":\"a\"}\n" && accumulator.finishReason == "stop" && accumulator.done, "SSE accumulator joins delta content")
+        let sse = rows.map { row -> String in
+            let line = String(decoding: try! JSONSerialization.data(withJSONObject: row), as: UTF8.self) + "\n"
+            let chunk = try! JSONSerialization.data(withJSONObject: ["choices": [["delta": ["content": line]]]])
+            return "data: " + String(decoding: chunk, as: UTF8.self) + "\n\n"
+        }.joined() + "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
+        SuggestionFixtureProtocol.set(Data(sse.utf8), contentType: "text/event-stream")
+        let seen = PartialRecorder()
+        let streamed = try await service.suggest(input: input, service: config, onPartial: { await seen.record($0.count) })
+        let partialCounts = await seen.values
+        try check(streamed.count == 3 && partialCounts.first == 1 && partialCounts.last == 3, "streamed suggestions appear one by one")
         try fixture(encoded(rows), finish: "length")
         try await failure(.incompleteTranslation) { _ = try await service.suggest(input: input, service: config) }
         try fixture(encoded(rows), extra: ["tool_calls": [["id": "no"]]])
@@ -70,6 +97,8 @@ enum ContextSuggestionsChecks {
         try fixture("not JSON")
         try await failure(.invalidResponse) { _ = try await service.suggest(input: input, service: config) }
         try fixture("{\"suggestions\":[{\"title\":\"bad\"},{},{}]}")
+        try check(try await service.suggest(input: input, service: config).count == 1, "malformed rows dropped, usable row kept")
+        try fixture("{\"suggestions\":[{},{\"title\":5}]}")
         try await failure(.invalidResponse) { _ = try await service.suggest(input: input, service: config) }
         var blank = input; blank.text = " \n "
         try await failure(.invalidInput) { _ = try await service.suggest(input: blank, service: config) }
@@ -125,9 +154,9 @@ enum ContextSuggestionsChecks {
             guard let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
                   let messages = object["messages"] as? [[String: Any]], let content = messages.last?["content"] as? String,
                   let payload = (try? JSONSerialization.jsonObject(with: Data(content.utf8))) as? [String: Any],
-                  payload["id"] as? String == firstID.uuidString else { return nil }
-            return payload["text"] as? String
-        }
+                  payload["id"] as? String == firstID.uuidString, let part = payload["part"] as? Int, let text = payload["text"] as? String else { return nil }
+            return String(format: "%06d", part) + text
+        }.sorted().map { String($0.dropFirst(6)) }
         try check(sentChunks.joined() == longText, "request payloads include the long card's complete tail")
         let cancelledMulti = Task {
             try await service.summarize(input: multi, service: config, progress: { done, _ in
@@ -136,6 +165,17 @@ enum ContextSuggestionsChecks {
         }
         do { _ = try await cancelledMulti.value; throw SuggestionCheckFailure(message: "Multi-card cancellation ignored") }
         catch is CancellationError { try check(true, "multi-card processing stops between chunks when cancelled") }
+        let shortMulti = MultiCardContextInput(cards: [
+            .init(id: firstID, version: "a", text: "A报价10元。", sourceName: "Fixture A", sourceBundleID: "test.a", copiedAt: Date(timeIntervalSince1970: 100), missingReason: nil),
+            .init(id: secondID, version: "b", text: "B报价12元。", sourceName: "Fixture B", sourceBundleID: "test.b", copiedAt: Date(timeIntervalSince1970: 200), missingReason: nil)
+        ], targetName: "Fixture Target", targetBundleID: "test.target")
+        SuggestionFixtureProtocol.setBuilder { body in
+            let content = finalContent
+            _ = body
+            return (try? JSONSerialization.data(withJSONObject: ["model": "fixture-model", "choices": [["finish_reason": "stop", "message": ["content": content]]]])) ?? Data()
+        }
+        let shortSummary = try await service.summarize(input: shortMulti, service: config)
+        try check(SuggestionFixtureProtocol.allBodies().count == 1 && shortSummary.suggestions.count == 3, "short multi-select skips fact extraction")
         SuggestionFixtureProtocol.setBuilder(nil)
         try fixture("{\"sentence\":\"摘要\",\"facts\":[],\"suggestions\":[]}")
         try await failure(.invalidResponse) { _ = try await service.summarize(input: multi, service: config) }
@@ -143,25 +183,30 @@ enum ContextSuggestionsChecks {
     }
 }
 private struct SuggestionCheckFailure: Error { let message: String }
+private actor PartialRecorder {
+    var values: [Int] = []
+    func record(_ value: Int) { values.append(value) }
+}
 private final class SuggestionFixtureProtocol: URLProtocol, @unchecked Sendable {
     private static let lock = NSLock()
     nonisolated(unsafe) private static var response = Data()
+    nonisolated(unsafe) private static var contentType: String?
     nonisolated(unsafe) private static var captured = Data()
     nonisolated(unsafe) private static var builder: (@Sendable (Data) -> Data)?
     nonisolated(unsafe) private static var bodies: [Data] = []
     static func setBuilder(_ value: (@Sendable (Data) -> Data)?) { lock.lock(); defer { lock.unlock() }; builder = value; bodies = [] }
     static func allBodies() -> [Data] { lock.lock(); defer { lock.unlock() }; return bodies }
-    static func set(_ data: Data) { lock.lock(); defer { lock.unlock() }; response = data; builder = nil }
-    static func reset() { lock.lock(); defer { lock.unlock() }; response = Data(); captured = Data(); builder = nil; bodies = [] }
+    static func set(_ data: Data, contentType type: String? = nil) { lock.lock(); defer { lock.unlock() }; response = data; contentType = type; builder = nil }
+    static func reset() { lock.lock(); defer { lock.unlock() }; response = Data(); contentType = nil; captured = Data(); builder = nil; bodies = [] }
     static func body() throws -> [String: Any] { lock.lock(); let data = captured; lock.unlock(); return try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:] }
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
         var body = request.httpBody ?? Data()
         if let stream = request.httpBodyStream { stream.open(); defer { stream.close() }; var buffer = [UInt8](repeating: 0, count: 4096); while stream.hasBytesAvailable { let size = stream.read(&buffer, maxLength: buffer.count); if size <= 0 { break }; body.append(contentsOf: buffer.prefix(size)) } }
-        Self.lock.lock(); Self.captured = body; Self.bodies.append(body); let stored = Self.response; let make = Self.builder; Self.lock.unlock()
+        Self.lock.lock(); Self.captured = body; Self.bodies.append(body); let stored = Self.response; let make = Self.builder; let type = Self.contentType; Self.lock.unlock()
         let data = make?(body) ?? stored
-        guard let url = request.url, let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil) else { return }
+        guard let url = request.url, let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: type.map { ["Content-Type": $0] }) else { return }
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: data); client?.urlProtocolDidFinishLoading(self)
     }
