@@ -13,10 +13,22 @@ struct PastePanelView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // The panel grows upward from a fixed bottom edge, so the deck stays put
+            // while the detail layer is revealed above it.
+            ZStack(alignment: .bottom) {
+                if let detail = model.panelDetail {
+                    PanelDetailView(model: model, detail: detail)
+                        .padding(.horizontal, PanelMetrics.deckHorizontalPadding)
+                        .padding(.bottom, PanelDetailLayout.spacing)
+                        .transition(.opacity)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            .clipped()
             toolbar
             Color.clear.frame(height: PanelMetrics.toolbarDeckSpacing)
             deck.frame(height: PanelMetrics.deckHeight)
-            if model.contextSuggestionsPresented {
+            if model.contextSuggestionsPresented && model.panelDetail == nil {
                 ContextSuggestionsView(model: model)
                     .frame(height: PanelPresentation.suggestionContentHeight + model.suggestionAdditionalHeight)
                     .padding(.top, PanelPresentation.suggestionSpacing)
@@ -57,7 +69,8 @@ struct PastePanelView: View {
                                     .disabled(model.historyLoading)
                             }
                             ForEach(Array(model.visibleItems.enumerated()), id: \.element.id) { index, item in
-                                ClipCard(item: item, selected: model.selectedIDs.contains(item.id), index: index, categories: model.categories(for: item.id))
+                                ClipCard(item: item, selected: model.selectedIDs.contains(item.id), index: index, categories: model.categories(for: item.id),
+                                         onQuickAction: { page in quickAction(page, item) })
                                     .id(item.id)
                                     .onAppear { model.loadDisplayPayload(item.id) }
                                     .onDisappear { model.releaseDisplayPayload(item.id) }
@@ -67,6 +80,9 @@ struct PastePanelView: View {
                                     .help("单击选择，双击粘贴")
                                     .accessibilityAction { model.select(item) }
                                     .accessibilityAction(named: Text("粘贴")) { model.activate(item) }
+                                    .accessibilityAction(named: Text("预览")) { quickAction(.preview, item) }
+                                    .accessibilityAction(named: Text("编辑")) { quickAction(.edit, item) }
+                                    .accessibilityAction(named: Text("翻译")) { quickAction(.translate, item) }
                                     .contextMenu { cardMenu(item) }
                                     .draggable(item.id.uuidString)
                                     .dropDestination(for: String.self) { values, _ in
@@ -365,6 +381,13 @@ struct PastePanelView: View {
         Button("删除", role: .destructive) { ensureSelection(item); model.deleteSelected() }
     }
 
+    /// Hover buttons and accessibility actions select the card, then open its page.
+    private func quickAction(_ page: PanelDetailPage, _ item: ClipItem) {
+        guard page.isAvailable(for: item) else { return }
+        if !(model.selectedIDs.count == 1 && model.selectedIDs.contains(item.id)) { model.select(item) }
+        model.showDetailPage(page, for: item)
+    }
+
     private func selectOnClick(_ item: ClipItem) {
         let flags = NSEvent.modifierFlags
         let extend = flags.contains(.command) || flags.contains(.shift)
@@ -407,6 +430,8 @@ struct ClipCard: View {
     let selected: Bool
     let index: Int
     var categories: [Pinboard] = []
+    /// Opens a detail page from the hover buttons.
+    var onQuickAction: ((PanelDetailPage) -> Void)? = nil
     @State private var hovered = false
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -418,9 +443,13 @@ struct ClipCard: View {
                     Text(item.kind.displayName).font(.scaled(.caption)).foregroundStyle(selected ? PanelPalette.selectionSecondaryText : PanelPalette.secondaryText)
                 }
                 Spacer(minLength: 4)
-                TimelineView(.periodic(from: .now, by: 60)) { context in
-                    Text(relativeTime(now: context.date)).font(.scaled(.micro))
-                        .foregroundStyle(selected ? PanelPalette.selectionSecondaryText : PanelPalette.secondaryText).lineLimit(1)
+                if hovered, let onQuickAction {
+                    quickActions(onQuickAction)
+                } else {
+                    TimelineView(.periodic(from: .now, by: 60)) { context in
+                        Text(relativeTime(now: context.date)).font(.scaled(.micro))
+                            .foregroundStyle(selected ? PanelPalette.selectionSecondaryText : PanelPalette.secondaryText).lineLimit(1)
+                    }
                 }
             }.padding(.horizontal, 12).frame(height: PanelMetrics.cardHeaderHeight).background(selected ? PanelPalette.selection : (hovered ? PanelPalette.hover : PanelPalette.raised))
             VStack(alignment: .leading, spacing: 8) {
@@ -462,6 +491,24 @@ struct ClipCard: View {
             .accessibilityLabel(item.accessibilitySummary)
             .accessibilityAddTraits(.isButton)
             .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    /// Preview, edit and translate, shown in place of the time while the pointer is over the card.
+    private func quickActions(_ action: @escaping (PanelDetailPage) -> Void) -> some View {
+        HStack(spacing: 2) {
+            ForEach([PanelDetailPage.preview, .edit, .translate].filter { $0 != .translate || $0.isAvailable(for: item) }) { page in
+                Button { action(page) } label: {
+                    Image(systemName: page.systemImage).font(.scaled(.label, weight: .medium))
+                        .frame(width: 24, height: 24).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(!page.isAvailable(for: item))
+                .foregroundStyle(selected ? PanelPalette.selectionSecondaryText : PanelPalette.secondaryText)
+                .opacity(page.isAvailable(for: item) ? 1 : 0.4)
+                .help("\(page.title) (\(page.shortcutLabel))")
+                .accessibilityHidden(true)
+            }
+        }
     }
 
     private func relativeTime(now: Date) -> String {

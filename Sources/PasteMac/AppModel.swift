@@ -10,9 +10,14 @@ final class AppModel: ObservableObject {
     @Published var snapshot: ClipboardSnapshot { didSet { trackStorageChanges(from: oldValue); cachedVisibleItems = nil; restoreSession(); scheduleContextSuggestions() } }
     @Published var queryString = "" { didSet { cachedVisibleItems = nil; scheduleHistoryQuery(); scheduleContextSuggestions() } }
     @Published var selectedPinboardID: UUID? { didSet { cachedVisibleItems = nil; scheduleHistoryQuery(); scheduleContextSuggestions() } }
-    @Published var selectedIDs: Set<UUID> = [] { didSet { scheduleContextSuggestions() } }
+    @Published var selectedIDs: Set<UUID> = [] { didSet { scheduleContextSuggestions(); syncPanelDetailToSelection() } }
     @Published var filter = ClipFilter() { didSet { cachedVisibleItems = nil; scheduleHistoryQuery(); scheduleContextSuggestions() } }
     @Published var isSearchVisible = false
+    /// The detail layer above the deck, or nil when only the deck shows.
+    @Published var panelDetail: PanelDetailState? { didSet { if panelDetail != oldValue { panelDetailChanged(from: oldValue) } } }
+    /// The detail card height for the panel's current screen.
+    @Published var panelDetailContentHeight = PanelDetailLayout.contentHeight
+    var onPanelDetailChange: (() -> Void)?
     @Published var usesRecommendations = false { didSet { cachedVisibleItems = nil } }
     private var cachedVisibleItems: [ClipItem]?
     private var cachedRecommendationTarget: String?
