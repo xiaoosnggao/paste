@@ -9,50 +9,43 @@ private struct PreviewImageRevision: Hashable {
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
+/// The detail layer's preview page.
 struct PreviewView: View {
     @ObservedObject var model: AppModel
-    let item: ClipItem
+    let itemID: UUID?
     @StateObject private var links = LinkPreviewService()
     @State private var image: NSImage?
     @State private var imageError: String?
-    private var current: ClipItem? { model.snapshot.items.first { $0.id == item.id } }
+    private var current: ClipItem? { itemID.flatMap { id in model.snapshot.items.first { $0.id == id } } }
     var body: some View {
         Group {
             if let value = current {
-                WindowScaffold(value.title.isEmpty ? value.kind.displayName : value.title,
-                               subtitle: "\(value.sourceName) · \(value.createdAt.formatted(date: .abbreviated, time: .shortened))") {
-                    accessory(value)
-                } content: {
-                    VStack(alignment: .leading, spacing: WindowMetrics.sectionSpacing) {
-                        mainContent(value)
+                PanelDetailScaffold(model: model, item: value, page: .preview,
+                                    title: value.title.isEmpty ? value.kind.displayName : value.title,
+                                    subtitle: "\(value.sourceName) · \(value.createdAt.formatted(date: .abbreviated, time: .shortened))") {
+                    HStack(alignment: .top, spacing: DesignTokens.Space.lg) {
+                        mainContent(value).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                         if value.kind == .image || value.kind == .text || value.kind == .link {
-                            ClipEnrichmentView(model: model, item: value)
+                            ScrollView { ClipEnrichmentView(model: model, item: value).controlSize(.small) }
+                                .scrollIndicators(.automatic)
+                                .frame(width: 360)
                         }
                     }
                 } footer: {
                     footer(value)
                 }
             } else {
-                WindowScaffold("预览") {
+                PanelDetailScaffold(model: model, item: nil, page: .preview, title: "预览") {
                     ContentUnavailableView("此卡片已删除", systemImage: "trash").frame(maxWidth: .infinity, maxHeight: .infinity)
                 } footer: {
                     Spacer()
-                    WindowCloseButton()
+                    Button("关闭") { model.closePanelDetail() }
                 }
             }
         }
-        .frame(minWidth: 560, minHeight: 420)
         .task(id: current.map { PreviewImageRevision(id: $0.id, representations: $0.representations) }) { await loadThumbnail() }
         .onDisappear { links.cancel() }
         .onChange(of: current?.text) { _, _ in links.reset() }
-    }
-    private func accessory(_ value: ClipItem) -> some View {
-        HStack(spacing: DesignTokens.Space.sm) {
-            SourceIcon(item: value).frame(width: 20, height: 20).accessibilityHidden(true)
-            if value.kind == .text || value.kind == .link {
-                Button("智能处理", systemImage: "sparkles") { model.intelligence(value) }.controlSize(.small)
-            }
-        }
     }
     @ViewBuilder private func mainContent(_ value: ClipItem) -> some View {
         if value.kind == .image { imageContent(value) }
@@ -66,7 +59,7 @@ struct PreviewView: View {
                 Text(value.text).font(.scaled(.title)).lineSpacing(3).textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(minHeight: 96, maxHeight: .infinity)
+            .frame(minHeight: 72, maxHeight: .infinity)
             .windowWell()
         }
     }
@@ -95,7 +88,10 @@ struct PreviewView: View {
                 }
             }
         }
-        WindowCloseButton()
+        Button("复制", systemImage: "doc.on.doc") { model.select(value); model.copySelected() }
+        Button("粘贴") { model.activate(value) }
+            .buttonStyle(.borderedProminent).foregroundStyle(PanelPalette.onAccent)
+            .help("粘贴到当前应用 (↩)")
     }
     private func imageContent(_ value: ClipItem) -> some View {
         Group {
@@ -103,7 +99,7 @@ struct PreviewView: View {
             else if let imageError { Text(imageError).font(.scaled(.body)).foregroundStyle(PanelPalette.secondaryText) }
             else { ProgressView() }
         }
-        .frame(maxWidth: .infinity, minHeight: 120, maxHeight: .infinity)
+        .frame(maxWidth: .infinity, minHeight: 96, maxHeight: .infinity)
         .windowWell(padding: DesignTokens.Space.sm)
     }
     private func filesContent(_ value: ClipItem) -> some View {

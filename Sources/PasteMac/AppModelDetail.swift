@@ -25,7 +25,13 @@ extension AppModel {
     /// Opens a page for the selected card when the page applies to it.
     func openPanelDetailForSelection(_ page: PanelDetailPage) {
         selectFirstIfNeeded()
-        guard let item = selectedItems.first, page.isAvailable(for: item) else { return }
+        guard let item = selectedItems.first else { return }
+        showDetailPage(page, for: item)
+    }
+
+    /// The page bar and shortcuts run the same actions as the context menu.
+    func showDetailPage(_ page: PanelDetailPage, for item: ClipItem) {
+        guard page.isAvailable(for: item) else { return }
         switch page {
         case .preview: preview(item)
         case .edit: edit(item)

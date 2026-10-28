@@ -23,7 +23,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private var settingsWindow: NSWindow?
     private var accessibilityGuide: AccessibilityGuide?
     private var editorWindow: NSWindow?
-    private var previewWindow: NSWindow?
     private var intelligenceWindow: NSWindow?
     private var suggestionResultWindow: NSWindow?
     private var historyManagementWindow: NSWindow?
@@ -73,6 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             NSApp.activate(); self.historyManagementWindow?.makeKeyAndOrderFront(nil)
         }
         model.onSuggestionPanelChange = { [weak self] _ in self?.resizePanelForSuggestions() }
+        model.onPanelDetailChange = { [weak self] in self?.panelDetailChanged() }
         model.pasteEngine.onTargetChange = { [weak self] in self?.model.scheduleContextSuggestions() }
         model.onSettings = { [weak self] in self?.showSettings() }
         model.onAccessibilityGuide = { [weak self] in
@@ -161,7 +161,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         model.scheduleContextSuggestions()
         let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
         let frame = screen?.frame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-        let destination = PanelPresentation.visibleFrame(on: frame, suggestionsVisible: model.contextSuggestionsPresented, additionalHeight: model.suggestionAdditionalHeight)
+        let destination = panelDestination(on: frame)
         presentationGeneration += 1
         let wasPresented = panelPresented
         panelPresented = true
@@ -195,8 +195,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
     private func applySuggestionPanelSize() {
         guard panelPresented, model.suggestionSessionActive, !model.isPasting, let panel, let screen = panel.screen else { return }
-        let destination = PanelPresentation.visibleFrame(on: screen.frame, suggestionsVisible: model.contextSuggestionsPresented, additionalHeight: model.suggestionAdditionalHeight)
+        let destination = panelDestination(on: screen.frame)
         panelFrameAnimator.animate(panel, to: destination, reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+    }
+    /// One height for the panel: base deck plus either the detail layer or the suggestions bar.
+    private func panelDestination(on screen: NSRect) -> NSRect {
+        let detailHeight = PanelDetailLayout.contentHeight(forScreenHeight: screen.height)
+        if model.panelDetailContentHeight != detailHeight { model.panelDetailContentHeight = detailHeight }
+        return PanelPresentation.visibleFrame(on: screen, suggestionsVisible: model.contextSuggestionsPresented,
+                                              additionalHeight: model.suggestionAdditionalHeight,
+                                              detailContentHeight: model.panelDetail == nil ? nil : detailHeight)
+    }
+    private func panelDetailChanged() {
+        if panelPresented { resizePanelForSuggestions() }
+        else if model.panelDetail != nil { showPanel() }
     }
     private func cancelSuggestionResize() {
         pendingSuggestionResize?.cancel(); pendingSuggestionResize = nil
@@ -205,7 +217,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private func hidePanel(restoreTarget: Bool = false) {
         panelPresented = false
         cancelSuggestionResize()
-        guard panel.isVisible else { model?.suggestionSessionActive = false; finishPasteHide(); return }
+        guard panel.isVisible else { model?.suggestionSessionActive = false; model?.panelDidHide(); finishPasteHide(); return }
         presentationGeneration += 1
         let generation = presentationGeneration
         let finish = { [weak self] in
@@ -213,6 +225,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             self.panel.orderOut(nil)
             // Keep the summary intact until the surface has left the screen.
             self.model?.suggestionSessionActive = false
+            self.model?.panelDidHide()
             self.panel.alphaValue = 1
             if restoreTarget { self.model.pasteEngine.restoreTarget() }
             self.finishPasteHide()
@@ -232,6 +245,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         panelPresented = false
         cancelSuggestionResize()
         model?.suggestionSessionActive = false
+        model?.panelDidHide()
         presentationGeneration += 1
         panel.orderOut(nil)
         panelSurface.layer?.removeAllAnimations()
@@ -297,12 +311,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         NSApp.activate()
         editorWindow?.makeKeyAndOrderFront(nil)
     }
+    /// Preview opens in the panel's detail layer instead of a window.
     private func showPreview(_ item: ClipItem) {
-        previewWindow?.close()
-        model.retainHistory([item.id], for: "preview")
-        previewWindow = window(title: item.title.isEmpty ? item.kind.displayName : String(item.title.prefix(80)), size: .init(width: 660, height: 480), view: PreviewView(model: model, item: item))
-        NSApp.activate()
-        previewWindow?.makeKeyAndOrderFront(nil)
+        model.openPanelDetail(.preview, itemID: item.id)
     }
     private func showStack() {
         model.pasteEngine.rememberTarget()
@@ -441,8 +452,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let textEditing = panel.firstResponder is NSTextView
         if event.isARepeat && !textEditing && ([36, 76].contains(event.keyCode) || flags.contains(.command)) { return true }
         if event.keyCode == 53 {
-            if textEditing { return false }
-            hidePanel(restoreTarget: true); return true
+            let editor = panel.firstResponder as? NSTextView
+            switch PanelEscapeAction.resolve(detailOpen: model.panelDetail != nil, textEditing: textEditing,
+                                             fieldEditor: editor?.isFieldEditor == true, composing: editor?.hasMarkedText() == true) {
+            case .passToText: return false
+            case .endTextEditing: panel.makeFirstResponder(nil); return true
+            case .closeDetail: model.closePanelDetail(); return true
+            case .hidePanel: hidePanel(restoreTarget: true); return true
+            }
         }
         if flags == .option, !textEditing,
            let number = PanelKeyboard.digit(for: event.keyCode),
@@ -466,6 +483,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                     return true
                 }
                 if key == "o", let item = model.selectedItems.first { model.openItem(item); return true }
+                if flags == .command, let page = PanelDetailPage.forCommandKey(key) { model.openPanelDetailForSelection(page); return true }
                 if event.keyCode == 124 || event.keyCode == 123 {
                     let ids: [UUID?] = [nil] + model.snapshot.pinboards.map { Optional($0.id) }
                     let index = ids.firstIndex(where: { $0 == model.selectedPinboardID }) ?? 0
@@ -478,8 +496,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         switch event.keyCode {
         case 123: model.moveSelection(-1); return true
         case 124: model.moveSelection(1); return true
-        case 36, 76: model.activateSelected(plainText: flags.contains(.shift)); return true
-        case 49: if let item = model.selectedItems.first { model.preview(item) }; return true
+        case 36, 76:
+            // The preview can show a card outside the selection, such as a suggestion's source.
+            if model.panelDetail?.page == .preview, let item = model.panelDetailItem { model.activate(item, plainText: flags.contains(.shift)) }
+            else { model.activateSelected(plainText: flags.contains(.shift)) }
+            return true
+        case 49: model.togglePreviewDetail(); return true
         case 51, 117: model.deleteSelected(); return true
         default: return false
         }
@@ -540,7 +562,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
     func windowWillClose(_ notification: Notification) {
         if notification.object as? NSWindow === editorWindow { model.releaseHistory(for: "editor") }
-        if notification.object as? NSWindow === previewWindow { model.releaseHistory(for: "preview") }
         if notification.object as? NSWindow === intelligenceWindow { model.releaseHistory(for: "intelligence") }
         if notification.object as? NSWindow === suggestionResultWindow { model.releaseHistory(for: "suggestion") }
         if notification.object as? NSWindow === toolWindow { model.toolSessionActive = false; model.cancelToolOperation() }
@@ -588,7 +609,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         guard selectionTask == nil, screenshotTask == nil, !screenshotCoordinator.isCapturing, !model.isPasting else { return }
         model.toolSessionActive = false
         model.cancelToolOperation(); model.toolItemID = nil; model.toolInputText = ""; model.toolError = nil; model.toolStatus = nil
-        toolWindow?.orderOut(nil); previewWindow?.orderOut(nil); settingsWindow?.orderOut(nil)
+        toolWindow?.orderOut(nil); settingsWindow?.orderOut(nil)
         screenshotTask = Task { @MainActor [weak self] in
             guard let self else { return }
             defer { self.screenshotTask = nil }
@@ -657,7 +678,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
     private func showToolPermissionGuide(_ kind: PermissionGuideKind, onAuthorized: @escaping () -> Void) {
         model.toolSessionActive = false
-        hidePanel(); toolWindow?.orderOut(nil); previewWindow?.orderOut(nil)
+        hidePanel(); toolWindow?.orderOut(nil)
         if accessibilityGuide == nil { accessibilityGuide = AccessibilityGuide(model: model) }
         accessibilityGuide?.show(kind: kind, onAuthorized: onAuthorized)
     }
