@@ -313,6 +313,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
     /// Preview opens in the panel's detail layer instead of a window.
     private func showPreview(_ item: ClipItem) {
+        // Showing the panel selects the first card when nothing is selected; select this one instead so the preview stays on it.
+        if model.selectedIDs.isEmpty, model.visibleItems.contains(where: { $0.id == item.id }) { model.select(item) }
         model.openPanelDetail(.preview, itemID: item.id)
     }
     private func showStack() {
@@ -450,7 +452,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private func handle(_ event: NSEvent) -> Bool {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let textEditing = panel.firstResponder is NSTextView
-        if event.isARepeat && !textEditing && ([36, 76].contains(event.keyCode) || flags.contains(.command)) { return true }
+        if event.isARepeat && !textEditing && ([36, 76, 49].contains(event.keyCode) || flags.contains(.command)) { return true }
         if event.keyCode == 53 {
             let editor = panel.firstResponder as? NSTextView
             switch PanelEscapeAction.resolve(detailOpen: model.panelDetail != nil, textEditing: textEditing,
