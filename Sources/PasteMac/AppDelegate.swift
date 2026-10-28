@@ -6,6 +6,13 @@ import QuartzCore
 import OSLog
 import Combine
 
+/// The 连续粘贴 capsule never becomes key, so clicking it leaves the target
+/// app focused with its insertion point intact.
+final class StackCapsulePanel: NSPanel {
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
+}
+
 final class ClipboardPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
@@ -25,7 +32,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private var suggestionResultWindow: NSWindow?
     private var historyManagementWindow: NSWindow?
     private var mcpService: MCPService!
-    private var stackWindow: NSWindow?
+    private var stackCapsule: StackCapsulePanel?
+    /// Top-left corner the capsule keeps while its height changes.
+    private var stackCapsuleTopLeft: CGPoint?
+    private var positioningStackCapsule = false
     private var shortcut: GlobalShortcut!
     private var stackShortcut: GlobalShortcut!
     private var localKeyMonitor: Any?
@@ -84,6 +94,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         model.onPreview = { [weak self] item in self?.showPreview(item) }
         model.onIntelligence = { [weak self] item in self?.showIntelligence(item) }
         model.onStack = { [weak self] in self?.showStack() }
+        model.onStackPasted = { [weak self] in self?.placeStackCapsule(followMouse: true) }
         model.onToolStart = { [weak self] in
             self?.permissionResumeTask?.cancel(); self?.permissionResumeTask = nil
             self?.accessibilityGuide?.dismiss()
@@ -315,11 +326,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
     private func showStack() {
         model.pasteEngine.rememberTarget()
-        // StackView needs at least 440pt; a narrower window clips its content.
-        if stackWindow == nil { stackWindow = window(title: "连续粘贴", size: .init(width: 440, height: 490), view: StackView(model: model)) }
-        stackWindow?.level = .floating
-        NSApp.activate()
-        stackWindow?.makeKeyAndOrderFront(nil)
+        let capsule = stackCapsule ?? makeStackCapsule()
+        stackCapsule = capsule
+        // No NSApp.activate(): the capsule floats without taking focus.
+        capsule.orderFrontRegardless()
+        placeStackCapsule(followMouse: true)
+    }
+
+    private func makeStackCapsule() -> StackCapsulePanel {
+        let capsule = StackCapsulePanel(contentRect: NSRect(x: 0, y: 0, width: StackCapsuleView.width, height: 52),
+                                        styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        capsule.isFloatingPanel = true
+        capsule.level = .floating
+        capsule.hidesOnDeactivate = false
+        capsule.becomesKeyOnlyIfNeeded = true
+        capsule.isOpaque = false
+        capsule.backgroundColor = .clear
+        capsule.hasShadow = true
+        capsule.isMovableByWindowBackground = true
+        capsule.isReleasedWhenClosed = false
+        capsule.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        capsule.title = "连续粘贴"
+        let host = NSHostingController(rootView: StackCapsuleView(model: model) { [weak self] in self?.closeStackCapsule() })
+        host.sizingOptions = [.preferredContentSize]
+        capsule.contentViewController = host
+        capsule.delegate = self
+        return capsule
+    }
+
+    private func closeStackCapsule() {
+        stackCapsule?.orderOut(nil)
+        stackCapsuleTopLeft = nil
+    }
+
+    /// Moves the capsule next to the mouse (on show and after each paste) or
+    /// keeps its top-left corner (after a resize), clamped to the visible screen.
+    /// The capsule stays put when the mouse is already over it, which is the case
+    /// right after clicking 粘贴下一项, so the button doesn't jump away.
+    private func placeStackCapsule(followMouse: Bool) {
+        guard let capsule = stackCapsule, capsule.isVisible else { return }
+        let mouse = NSEvent.mouseLocation
+        let size = capsule.frame.size
+        let frame: CGRect
+        if followMouse, !capsule.frame.insetBy(dx: -StackCapsulePlacement.cursorGap, dy: -StackCapsulePlacement.cursorGap).contains(mouse) {
+            let screen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? capsule.screen ?? NSScreen.main
+            guard let visible = screen?.visibleFrame else { return }
+            frame = StackCapsulePlacement.frame(size: size, mouse: mouse, visible: visible)
+        } else {
+            guard let visible = (capsule.screen ?? NSScreen.main)?.visibleFrame else { return }
+            let topLeft = stackCapsuleTopLeft ?? CGPoint(x: capsule.frame.minX, y: capsule.frame.maxY)
+            frame = StackCapsulePlacement.resized(size, topLeft: topLeft, visible: visible)
+        }
+        stackCapsuleTopLeft = CGPoint(x: frame.minX, y: frame.maxY)
+        guard frame != capsule.frame else { return }
+        positioningStackCapsule = true
+        capsule.setFrame(frame, display: true)
+        positioningStackCapsule = false
     }
 
     private func makeMenus() {
@@ -566,7 +628,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         selectionTask?.cancel(); screenshotTask?.cancel(); screenshotCoordinator.cancel(); model.cancelToolOperation()
         model.stopMonitoring(); mcpService.stop(); model.flushPersistence()
     }
+    func windowDidResize(_ notification: Notification) {
+        guard let capsule = stackCapsule, notification.object as? NSWindow === capsule, !positioningStackCapsule else { return }
+        placeStackCapsule(followMouse: false)
+    }
+
     func windowDidMove(_ notification: Notification) {
+        if let capsule = stackCapsule, notification.object as? NSWindow === capsule, !positioningStackCapsule {
+            // Dragged by hand: keep the new spot until the next show or paste.
+            stackCapsuleTopLeft = CGPoint(x: capsule.frame.minX, y: capsule.frame.maxY)
+            return
+        }
         guard let toolWindow, notification.object as? NSWindow === toolWindow,
               toolWindow.isVisible, !positioningToolWindow else { return }
         toolWindowPosition.save(toolWindow.frame.origin)

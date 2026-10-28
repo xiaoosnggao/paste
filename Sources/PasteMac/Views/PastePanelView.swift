@@ -68,8 +68,10 @@ struct PastePanelView: View {
                                 HistoryPagerTile(direction: .newer, loading: false, action: model.loadPreviousHistoryPage)
                                     .disabled(model.historyLoading)
                             }
+                            let stackPositions = model.stackPositions
                             ForEach(Array(model.visibleItems.enumerated()), id: \.element.id) { index, item in
                                 ClipCard(item: item, selected: model.selectedIDs.contains(item.id), index: index, categories: model.categories(for: item.id),
+                                         stackPosition: stackPositions[item.id],
                                          onQuickAction: { page in quickAction(page, item) })
                                     .id(item.id)
                                     .onAppear { model.loadDisplayPayload(item.id) }
@@ -436,6 +438,8 @@ struct ClipCard: View {
     let selected: Bool
     let index: Int
     var categories: [Pinboard] = []
+    /// Paste order in 连续粘贴, shown as a numbered badge.
+    var stackPosition: Int? = nil
     /// Opens a detail page from the hover buttons.
     var onQuickAction: ((PanelDetailPage) -> Void)? = nil
     @State private var hovered = false
@@ -449,6 +453,7 @@ struct ClipCard: View {
                     Text(item.kind.displayName).font(.scaled(.caption)).foregroundStyle(selected ? PanelPalette.selectionSecondaryText : PanelPalette.secondaryText)
                 }
                 Spacer(minLength: 4)
+                if let stackPosition { stackBadge(stackPosition) }
                 if hovered, let onQuickAction {
                     quickActions(onQuickAction)
                 } else {
@@ -500,6 +505,17 @@ struct ClipCard: View {
     }
 
     /// Preview, edit and translate, shown in place of the time while the pointer is over the card.
+    private func stackBadge(_ position: Int) -> some View {
+        Text("\(position)")
+            .font(.scaled(.micro, weight: .bold).monospacedDigit())
+            .foregroundStyle(PanelPalette.onAccent)
+            .frame(minWidth: 18, minHeight: 18)
+            .padding(.horizontal, position > 9 ? DesignTokens.Space.xs : 0)
+            .background(PanelPalette.accent, in: Capsule())
+            .help("连续粘贴第 \(position) 项")
+            .accessibilityLabel("连续粘贴第 \(position) 项")
+    }
+
     private func quickActions(_ action: @escaping (PanelDetailPage) -> Void) -> some View {
         HStack(spacing: 2) {
             ForEach([PanelDetailPage.preview, .edit, .translate].filter { $0 != .translate || $0.isAvailable(for: item) }) { page in
