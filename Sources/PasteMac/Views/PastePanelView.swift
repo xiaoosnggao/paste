@@ -130,75 +130,92 @@ struct PastePanelView: View {
         .padding(.horizontal, 22).padding(.bottom, 10)
     }
 
+    /// Fixed controls stay at their natural size; the search field takes up to
+    /// its ideal width next; the collection strip gets whatever is left and
+    /// only turns into a scroll view when its pills no longer fit.
     private var toolbar: some View {
-        GeometryReader { geometry in
-            let available = max(0, geometry.size.width - 140)
-            let searchWidth = min(180, available * 0.35)
-            let controlsWidth: CGFloat = model.isSearchVisible ? 240 + searchWidth : 192
-            let boardWidth = min(620, boardToolbarWidth, max(0, available - controlsWidth))
-            ZStack(alignment: .trailing) {
-                HStack(spacing: PanelMetrics.toolbarSpacing) {
-                    Button { model.usesRecommendations.toggle() } label: {
-                        Image(systemName: "sparkles").font(.scaled(.title)).frame(width: PanelMetrics.controlSize, height: PanelMetrics.controlSize).contentShape(Rectangle())
-                    }.buttonStyle(PanelControlStyle(selected: model.usesRecommendations)).focusEffectDisabled().help("按当前应用和最近使用情况推荐")
-                    .accessibilityLabel("智能推荐")
-                    .accessibilityValue(model.usesRecommendations ? "已开启" : "未开启")
-                    Button { model.isSearchVisible.toggle() } label: {
-                        Image(systemName: "magnifyingglass").font(.scaled(.title, weight: .medium)).frame(width: PanelMetrics.controlSize, height: PanelMetrics.controlSize).contentShape(Rectangle())
-                    }.buttonStyle(PanelControlStyle(selected: model.isSearchVisible)).focusEffectDisabled().help("搜索 ⌘F")
-                    .accessibilityLabel("搜索")
-                    Button { model.performTool(.screenshotOCR) } label: {
-                        Label("截图", systemImage: "camera.viewfinder")
-                            .font(.scaled(.label, weight: .medium)).frame(width: 64, height: PanelMetrics.controlSize).contentShape(Rectangle())
-                    }.buttonStyle(PanelControlStyle()).focusEffectDisabled().help("截图识别")
-                    if model.isSearchVisible {
-                        PanelInputField(placeholder: "搜索或描述要找的内容", text: $model.queryString, focused: $searchFocused,
-                                        onSubmit: model.submitHistorySearch,
-                                        onCancel: { model.isSearchVisible = false; model.queryString = ""; searchFocused = false })
-                            .padding(.horizontal, 9).frame(width: searchWidth, height: PanelMetrics.controlSize)
-                            .modifier(PasteboardInputSurface(focused: searchFocused))
-                            .onAppear { searchFocused = true }
-                        filterMenu
-                    }
-                    ScrollView(.horizontal) {
-                        HStack(spacing: 6) {
-                            boardPill("剪贴板", id: nil, color: .blue)
-                            ForEach(model.snapshot.pinboards) { board in
-                                if renamingBoard == board.id {
-                                    PanelInputField(placeholder: "名称", text: $renameText,
-                                                    focused: Binding(get: { boardNameFocused == board.id },
-                                                                     set: { boardNameFocused = $0 ? board.id : nil }),
-                                                    onSubmit: { finishRename(board.id) },
-                                                    onCancel: { renamingBoard = nil; boardNameFocused = nil })
-                                        .padding(.horizontal, 9).frame(width: 115, height: PanelMetrics.controlSize)
-                                        .modifier(PasteboardInputSurface(focused: boardNameFocused == board.id))
-                                } else {
-                                    boardPill(board.name, id: board.id, color: Color(hex: board.colorHex))
-                                        .contextMenu {
-                                            Button("重命名") { beginRename(board.id, name: board.name) }
-                                            Button("自动归类设置…") { classificationBoard = board }
-                                            Button("向左移动") { model.movePinboard(board.id, delta: -1) }
-                                            Button("向右移动") { model.movePinboard(board.id, delta: 1) }
-                                            Button("删除收藏夹…", role: .destructive) { pendingBoardDeletion = board }
-                                        }
-                                        .dropDestination(for: String.self) { values, _ in
-                                            model.selectedIDs = Set(values.compactMap(UUID.init(uuidString:)))
-                                            model.pinSelection(to: board.id)
-                                            return true
-                                        }
-                                }
-                            }
-                        }
-                    }.scrollIndicators(.never).frame(width: boardWidth, height: PanelMetrics.controlSize)
-                    Button(action: createBoard) {
-                        Image(systemName: "plus").frame(width: PanelMetrics.controlSize, height: PanelMetrics.controlSize).contentShape(Rectangle())
-                    }.buttonStyle(PanelControlStyle()).focusEffectDisabled().help("新建收藏夹")
-                    .accessibilityLabel("新建收藏夹")
-                }.frame(width: min(available, controlsWidth + boardWidth), height: PanelMetrics.toolbarHeight)
-                    .frame(maxWidth: .infinity)
-                appMenu.padding(.trailing, PanelMetrics.toolbarTrailingPadding)
+        ZStack(alignment: .trailing) {
+            HStack(spacing: PanelMetrics.toolbarSpacing) {
+                toolbarControls.fixedSize()
+                if model.isSearchVisible {
+                    PanelInputField(placeholder: "搜索或描述要找的内容", text: $model.queryString, focused: $searchFocused,
+                                    onSubmit: model.submitHistorySearch,
+                                    onCancel: { model.isSearchVisible = false; model.queryString = ""; searchFocused = false })
+                        .padding(.horizontal, 9)
+                        .frame(minWidth: PanelMetrics.searchFieldMinWidth, idealWidth: PanelMetrics.searchFieldIdealWidth,
+                               maxWidth: PanelMetrics.searchFieldIdealWidth)
+                        .frame(height: PanelMetrics.controlSize)
+                        .modifier(PasteboardInputSurface(focused: searchFocused))
+                        .onAppear { searchFocused = true }
+                        .layoutPriority(1)
+                    filterMenu
+                }
+                ViewThatFits(in: .horizontal) {
+                    boardStrip.fixedSize(horizontal: true, vertical: false)
+                    ScrollView(.horizontal) { boardStrip }.scrollIndicators(.never)
+                }
+                .frame(height: PanelMetrics.controlSize)
+                Button(action: createBoard) {
+                    Image(systemName: "plus").frame(width: PanelMetrics.controlSize, height: PanelMetrics.controlSize).contentShape(Rectangle())
+                }.buttonStyle(PanelControlStyle()).focusEffectDisabled().help("新建收藏夹")
+                .accessibilityLabel("新建收藏夹")
             }
-        }.frame(height: PanelMetrics.toolbarHeight)
+            // Centered in the panel, but never under the trailing menu (mirrored on the leading side).
+            .padding(.horizontal, PanelMetrics.toolbarTrailingPadding + PanelMetrics.controlSize + PanelMetrics.toolbarSpacing)
+            .frame(maxWidth: .infinity)
+            appMenu.padding(.trailing, PanelMetrics.toolbarTrailingPadding)
+        }
+        .frame(height: PanelMetrics.toolbarHeight)
+    }
+
+    private var toolbarControls: some View {
+        HStack(spacing: PanelMetrics.toolbarSpacing) {
+            Button { model.usesRecommendations.toggle() } label: {
+                Image(systemName: "sparkles").font(.scaled(.title)).frame(width: PanelMetrics.controlSize, height: PanelMetrics.controlSize).contentShape(Rectangle())
+            }.buttonStyle(PanelControlStyle(selected: model.usesRecommendations)).focusEffectDisabled().help("按当前应用和最近使用情况推荐")
+            .accessibilityLabel("智能推荐")
+            .accessibilityValue(model.usesRecommendations ? "已开启" : "未开启")
+            Button { model.isSearchVisible.toggle() } label: {
+                Image(systemName: "magnifyingglass").font(.scaled(.title, weight: .medium)).frame(width: PanelMetrics.controlSize, height: PanelMetrics.controlSize).contentShape(Rectangle())
+            }.buttonStyle(PanelControlStyle(selected: model.isSearchVisible)).focusEffectDisabled().help("搜索 ⌘F")
+            .accessibilityLabel("搜索")
+            Button { model.performTool(.screenshotOCR) } label: {
+                Label("截图", systemImage: "camera.viewfinder")
+                    .font(.scaled(.label, weight: .medium))
+                    .padding(.horizontal, DesignTokens.Space.sm).frame(height: PanelMetrics.controlSize).contentShape(Rectangle())
+            }.buttonStyle(PanelControlStyle()).focusEffectDisabled().help("截图识别")
+        }
+    }
+
+    private var boardStrip: some View {
+        HStack(spacing: 6) {
+            boardPill("剪贴板", id: nil, color: .blue)
+            ForEach(model.snapshot.pinboards) { board in
+                if renamingBoard == board.id {
+                    PanelInputField(placeholder: "名称", text: $renameText,
+                                    focused: Binding(get: { boardNameFocused == board.id },
+                                                     set: { boardNameFocused = $0 ? board.id : nil }),
+                                    onSubmit: { finishRename(board.id) },
+                                    onCancel: { renamingBoard = nil; boardNameFocused = nil })
+                        .padding(.horizontal, 9).frame(width: PanelMetrics.boardRenameWidth, height: PanelMetrics.controlSize)
+                        .modifier(PasteboardInputSurface(focused: boardNameFocused == board.id))
+                } else {
+                    boardPill(board.name, id: board.id, color: Color(hex: board.colorHex))
+                        .contextMenu {
+                            Button("重命名") { beginRename(board.id, name: board.name) }
+                            Button("自动归类设置…") { classificationBoard = board }
+                            Button("向左移动") { model.movePinboard(board.id, delta: -1) }
+                            Button("向右移动") { model.movePinboard(board.id, delta: 1) }
+                            Button("删除收藏夹…", role: .destructive) { pendingBoardDeletion = board }
+                        }
+                        .dropDestination(for: String.self) { values, _ in
+                            model.selectedIDs = Set(values.compactMap(UUID.init(uuidString:)))
+                            model.pinSelection(to: board.id)
+                            return true
+                        }
+                }
+            }
+        }
     }
 
     private func createBoard() {
@@ -221,16 +238,6 @@ struct PastePanelView: View {
         boardNameFocused = nil
     }
 
-    private var boardToolbarWidth: CGFloat {
-        let font = NSFont.systemFont(ofSize: 12, weight: .semibold)
-        let clipboardWidth = ("剪贴板" as NSString).size(withAttributes: [.font: font]).width + 26
-        let widths = model.snapshot.pinboards.map { board -> CGFloat in
-            if renamingBoard == board.id { return 115 }
-            return min(160, (board.name as NSString).size(withAttributes: [.font: font]).width + 39)
-        }
-        return clipboardWidth + widths.reduce(0, +) + CGFloat(widths.count) * 6
-    }
-
     private func boardPill(_ title: String, id: UUID?, color: Color) -> some View {
         let selected = model.selectedPinboardID == id
         return Button { model.selectedPinboardID = id; model.selectedIDs = [] } label: {
@@ -243,7 +250,7 @@ struct PastePanelView: View {
                     .lineLimit(1).truncationMode(.tail)
             }
             .foregroundStyle(selected ? PanelPalette.selectionText : PanelPalette.text)
-            .padding(.horizontal, 13).frame(height: PanelMetrics.controlSize).frame(maxWidth: 160)
+            .padding(.horizontal, 13).frame(height: PanelMetrics.controlSize).frame(maxWidth: PanelMetrics.boardPillMaxWidth)
             .background(selected ? PanelPalette.selection : PanelPalette.raised, in: Capsule())
             .overlay(Capsule().strokeBorder(selected ? PanelPalette.border : PanelPalette.border.opacity(0.45), lineWidth: 0.75))
             .contentShape(Capsule())

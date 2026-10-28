@@ -17,6 +17,10 @@ enum PanelMetrics {
     static let controlSize: CGFloat = 32
     static let toolbarSpacing: CGFloat = 8
     static let toolbarTrailingPadding: CGFloat = 22
+    static let searchFieldMinWidth: CGFloat = 120
+    static let searchFieldIdealWidth: CGFloat = 180
+    static let boardPillMaxWidth: CGFloat = 160
+    static let boardRenameWidth: CGFloat = 120
 
     // Card deck
     static let deckSpacing: CGFloat = 14
