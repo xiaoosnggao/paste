@@ -82,13 +82,15 @@ struct WindowScaffold<Accessory: View, Content: View, Footer: View>: View {
 
     private var titleBar: some View {
         HStack(spacing: WindowMetrics.footerSpacing) {
-            Text(title).font(.scaled(.label, weight: .semibold)).lineLimit(1)
+            Text(title).font(.scaled(.label, weight: .semibold)).lineLimit(1).truncationMode(.tail)
+                .help(title).layoutPriority(1)
                 .accessibilityAddTraits(.isHeader)
             if let subtitle, !subtitle.isEmpty {
-                Text(subtitle).font(.scaled(.caption)).foregroundStyle(PanelPalette.secondaryText).lineLimit(1).truncationMode(.middle)
+                Text(subtitle).font(.scaled(.caption)).foregroundStyle(PanelPalette.secondaryText).lineLimit(1).truncationMode(.tail)
+                    .help(subtitle)
             }
             Spacer(minLength: WindowMetrics.footerSpacing)
-            accessory
+            accessory.fixedSize()
         }
         .padding(.leading, chrome == .window ? WindowMetrics.trafficLightInset : WindowMetrics.contentPadding)
         .padding(.trailing, chrome == .window ? DesignTokens.Space.md : WindowMetrics.contentPadding)
@@ -106,10 +108,13 @@ extension WindowScaffold where Accessory == EmptyView {
 extension View {
     /// The window's main action: accent fill, triggered by Return.
     func windowPrimaryAction() -> some View {
-        buttonStyle(.borderedProminent)
-            .tint(PanelPalette.accent)
-            .foregroundStyle(PanelPalette.onAccent)
-            .keyboardShortcut(.defaultAction)
+        primaryActionStyle().keyboardShortcut(.defaultAction)
+    }
+
+    /// Accent capsule that stays legible in non-key windows and the non-activating panel,
+    /// where `.borderedProminent` falls back to a pale bezel under white text.
+    func primaryActionStyle(fill: Color = PanelPalette.accent) -> some View {
+        buttonStyle(PrimaryActionButtonStyle(fill: fill))
     }
 
     /// Cancel or Close, triggered by Esc.
@@ -120,6 +125,25 @@ extension View {
     /// A recessed area for text, lists and images inside a glass window.
     func windowWell(padding: CGFloat = DesignTokens.Space.md) -> some View {
         modifier(WindowWell(padding: padding))
+    }
+}
+
+struct PrimaryActionButtonStyle: ButtonStyle {
+    var fill: Color = PanelPalette.accent
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.controlSize) private var controlSize
+    func makeBody(configuration: Configuration) -> some View {
+        let compact = controlSize == .small || controlSize == .mini
+        configuration.label
+            .font(.scaled(compact ? .caption : .label, weight: .semibold))
+            .lineLimit(1)
+            .foregroundStyle(PanelPalette.onAccent)
+            .padding(.horizontal, compact ? DesignTokens.Space.sm : DesignTokens.Space.md)
+            .frame(minHeight: compact ? 22 : 28)
+            .background(fill.opacity(configuration.isPressed ? 0.8 : 1), in: Capsule())
+            .opacity(isEnabled ? 1 : 0.45)
+            .fixedSize()
+            .contentShape(Capsule())
     }
 }
 

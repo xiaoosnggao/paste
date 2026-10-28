@@ -38,6 +38,7 @@ enum SnapshotRenderer {
                 try await render("detail-edit-\(tag)", grown, radius: DesignTokens.Radius.panel, PastePanelView(model: model))
                 model.closePanelDetail()
                 model.toolInputText = text.text
+                model.toolItemID = text.id
                 model.openPanelDetail(.translate, itemID: text.id)
                 try await render("detail-translate-\(tag)", grown, radius: DesignTokens.Radius.panel, PastePanelView(model: model))
                 model.closePanelDetail()
@@ -54,14 +55,31 @@ enum SnapshotRenderer {
                 try await render("preview-long", NSSize(width: 720, height: 480), PreviewView(model: model, itemID: long.id))
             }
             model.setStack(Array(model.visibleItems.prefix(4)))
-            try await render("capsule-collapsed", NSSize(width: StackCapsuleView.width, height: 60), radius: DesignTokens.Radius.xl, StackCapsuleView(model: model) {})
-            try await render("capsule-expanded", NSSize(width: StackCapsuleView.width, height: 60 + StackCapsuleView.listHeight(rows: 4) + 8), radius: DesignTokens.Radius.lg, StackCapsuleView(model: model, expanded: true) {})
+            let collapsed = StackCapsuleView(model: model) {}
+            try await render("capsule-collapsed", fit(collapsed, width: StackCapsuleView.width), radius: DesignTokens.Radius.xl, collapsed)
+            let expanded = StackCapsuleView(model: model, expanded: true) {}
+            try await render("capsule-expanded", fit(expanded, width: StackCapsuleView.width), radius: DesignTokens.Radius.lg, expanded)
             if let board = model.snapshot.pinboards.first {
-                try await render("classify-popover", NSSize(width: 360, height: 420), radius: DesignTokens.Radius.lg, CategoryClassificationSettings(model: model, board: board) {})
+                let popover = CategoryClassificationSettings(model: model, board: board) {}
+                try await render("classify-popover", fit(popover, width: CategoryClassificationSettings.popoverWidth), radius: DesignTokens.Radius.lg, popover)
             }
             try await render("settings", NSSize(width: 640, height: 592), SettingsView(model: model))
         }
         return count
+    }
+
+    /// The height the view asks for at a fixed width, as its real window sizes it.
+    static func fit<V: View>(_ view: V, width: CGFloat) -> NSSize {
+        let host = NSHostingView(rootView: view.frame(width: width).fixedSize(horizontal: false, vertical: true))
+        host.frame = NSRect(x: 0, y: 0, width: width, height: 10)
+        host.layoutSubtreeIfNeeded()
+        return NSSize(width: width, height: max(40, ceil(host.fittingSize.height)))
+    }
+
+    /// Key, so controls draw in their active state as in the real windows.
+    private final class SnapshotWindow: NSWindow {
+        override var canBecomeKey: Bool { true }
+        override var canBecomeMain: Bool { true }
     }
 
     static func makeModel() -> AppModel {
@@ -75,7 +93,7 @@ enum SnapshotRenderer {
 
     private static func snapshot<V: View>(_ view: V, size: NSSize, radius: CGFloat, appearance: NSAppearance, to url: URL) async throws {
         let frame = NSRect(origin: .zero, size: size)
-        let window = NSWindow(contentRect: NSRect(origin: NSPoint(x: -10_000, y: -10_000), size: size), styleMask: [.borderless], backing: .buffered, defer: false)
+        let window = SnapshotWindow(contentRect: NSRect(origin: NSPoint(x: -10_000, y: -10_000), size: size), styleMask: [.borderless], backing: .buffered, defer: false)
         window.appearance = appearance
         window.isReleasedWhenClosed = false
         window.backgroundColor = appearance.name == .darkAqua ? NSColor(white: 0.12, alpha: 1) : NSColor(white: 0.93, alpha: 1)
@@ -88,6 +106,7 @@ enum SnapshotRenderer {
         root.addSubview(content)
         window.contentView = root
         window.orderFrontRegardless()
+        window.makeKey()
         for _ in 0..<4 {
             root.layoutSubtreeIfNeeded()
             try await Task.sleep(nanoseconds: 150_000_000)

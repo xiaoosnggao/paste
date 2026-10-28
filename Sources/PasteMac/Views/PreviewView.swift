@@ -35,7 +35,8 @@ struct PreviewView: View {
                 } content: {
                     HStack(alignment: .top, spacing: DesignTokens.Space.lg) {
                         mainContent(value).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                        if value.kind == .image || value.kind == .text || value.kind == .link {
+                        // Results only; the actions that create them live in the ⋯ menu.
+                        if value.enrichment?.ocr != nil || value.enrichment?.translation != nil {
                             ScrollView { ClipEnrichmentView(model: model, item: value).controlSize(.small) }
                                 .scrollIndicators(.automatic)
                                 .frame(width: 300)
@@ -73,11 +74,58 @@ struct PreviewView: View {
                     .help("下一张 (→)").accessibilityLabel("下一张")
             }
             .controlSize(.small).fixedSize()
-            ForEach(PanelDetailPage.layerPages.filter { $0.isAvailable(for: value) }) { page in
-                Button(page.title, systemImage: page.systemImage) { model.openFromPreview(page, item: value) }
-                    .controlSize(.small)
-                    .help("在面板中\(page.title) (\(page.shortcutLabel))")
+            moreMenu(value)
+        }
+    }
+    /// Everything beyond paste and copy: the panel pages, recognition and image or file tools.
+    private func moreMenu(_ value: ClipItem) -> some View {
+        Menu {
+            Section("在面板中打开") {
+                ForEach(PanelDetailPage.layerPages.filter { $0.isAvailable(for: value) }) { page in
+                    Button("\(page.title) (\(page.shortcutLabel))", systemImage: page.systemImage) { model.openFromPreview(page, item: value) }
+                }
             }
+            if value.kind == .image || !value.text.isEmpty, value.kind != .file, value.kind != .color {
+                Section(ClipEnrichmentView.disclosure(for: value, model: model)) {
+                    if value.kind == .image {
+                        Button("识别文字", systemImage: "text.viewfinder") { model.recognizeItem(value) }
+                        Button("识别并翻译", systemImage: "character.bubble") { model.recognizeItem(value, translateAfter: true) }
+                    } else {
+                        Button("翻译", systemImage: "character.bubble") { model.translateItem(value) }
+                    }
+                    if value.enrichment != nil {
+                        Button("打开识别与翻译", systemImage: "arrow.up.forward.app") { model.showToolItem(value) }
+                    }
+                }
+            }
+            if value.kind == .image && !model.processingImageIDs.contains(value.id) {
+                Section {
+                    Button("移除背景（本机处理）", systemImage: "person.crop.rectangle") { model.removeImageBackground(value) }
+                    if value.originalRepresentations != nil {
+                        Button("恢复原图", systemImage: "arrow.uturn.backward") { model.restoreImageBackground(value) }
+                    }
+                }
+            }
+            if value.kind == .file {
+                Button("快速查看", systemImage: "eye") {
+                    if !QuickLookController.shared.show(urls: value.filePaths.map { URL(fileURLWithPath: $0) }) {
+                        model.statusMessage = "无法预览文件，文件可能已移动或删除。"
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+        }
+        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+        .help("更多操作").accessibilityLabel("更多操作")
+    }
+    private func footerNote(_ value: ClipItem) -> String {
+        if let message = model.statusMessage { return message }
+        switch value.kind {
+        case .image: return value.enrichment?.ocr.map { "已识别 \($0.text.count) 个字符" } ?? "图片"
+        case .file: return "\(value.filePaths.count) 个文件"
+        case .color: return value.text
+        default: return "\(value.characterCount) 个字符"
         }
     }
     @ViewBuilder private func mainContent(_ value: ClipItem) -> some View {
@@ -87,13 +135,16 @@ struct PreviewView: View {
                 .overlay(Text(value.text).font(.system(.largeTitle, design: .monospaced)).shadow(radius: 2))
         } else if value.kind == .file { filesContent(value) }
         else {
-            if value.kind == .link { linkContent(value).frame(maxWidth: .infinity, alignment: .leading).windowWell(padding: DesignTokens.Space.sm) }
-            ScrollView {
-                Text(value.text).font(.scaled(.title)).lineSpacing(3).textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            // Stacked: the link card sits above the URL, not beside it.
+            VStack(alignment: .leading, spacing: DesignTokens.Space.sm) {
+                if value.kind == .link { linkContent(value).frame(maxWidth: .infinity, alignment: .leading).windowWell(padding: DesignTokens.Space.sm) }
+                ScrollView {
+                    Text(value.text).font(.scaled(.title)).lineSpacing(3).textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(minHeight: 72, maxHeight: .infinity)
+                .windowWell()
             }
-            .frame(minHeight: 72, maxHeight: .infinity)
-            .windowWell()
         }
     }
     @ViewBuilder private func footer(_ value: ClipItem) -> some View {
@@ -101,28 +152,13 @@ struct PreviewView: View {
             ProgressView().controlSize(.small)
             WindowFooterNote("正在移除背景…")
         } else {
-            WindowFooterNote(model.statusMessage ?? "\(value.characterCount) 个字符 · \(value.representations.count) 种数据格式")
+            WindowFooterNote(footerNote(value))
         }
         Spacer()
-        if value.kind == .image {
-            if model.processingImageIDs.contains(value.id) {
-                Button("取消") { model.cancelImageProcessing(value.id) }
-            } else {
-                if value.originalRepresentations != nil {
-                    Button("恢复原图", systemImage: "arrow.uturn.backward") { model.restoreImageBackground(value) }
-                }
-                Button("移除背景", systemImage: "person.crop.rectangle") { model.removeImageBackground(value) }
-                    .help("移除背景在本机处理")
-            }
-        } else if value.kind == .file {
-            Button("快速查看", systemImage: "eye") {
-                if !QuickLookController.shared.show(urls: value.filePaths.map { URL(fileURLWithPath: $0) }) {
-                    model.statusMessage = "无法预览文件，文件可能已移动或删除。"
-                }
-            }
+        if value.kind == .image && model.processingImageIDs.contains(value.id) {
+            Button("取消") { model.cancelImageProcessing(value.id) }
         }
-        Button("复制", systemImage: "doc.on.doc") { model.select(value); model.copySelected() }
-        WindowCloseButton()
+        Button("复制") { model.select(value); model.copySelected() }
         Button("粘贴") { model.activate(value) }
             .windowPrimaryAction()
             .help("粘贴到当前应用 (↩)")

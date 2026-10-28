@@ -115,7 +115,7 @@ private struct AccessibilityGuideView: View {
                 Button(state.isReview ? "完成" : (state.granted ? "下一步" : "检查权限")) {
                     if state.isReview || state.granted { state.proceed() } else { state.refresh() }
                 }
-                .keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction).primaryActionStyle()
                 .controlSize(.large).disabled(state.repairing)
             }
         }

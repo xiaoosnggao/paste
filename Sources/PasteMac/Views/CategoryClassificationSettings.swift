@@ -30,7 +30,7 @@ struct CategoryClassificationSettings: View {
             .frame(height: Self.rowHeight)
             CategoryClassificationFields(description: $description, keywords: $keywords)
             HStack(spacing: WindowMetrics.footerSpacing) {
-                WindowFooterNote(enabled ? "新内容将自动归入此分类" : "已暂停自动归类")
+                if !enabled { WindowFooterNote("已暂停自动归类") }
                 Spacer()
                 Button("取消", action: onDismiss).windowCancelAction()
                 Button("保存") {

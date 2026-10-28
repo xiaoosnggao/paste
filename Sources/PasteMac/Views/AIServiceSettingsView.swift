@@ -337,7 +337,7 @@ struct AIServiceEditorSheet: View {
                 Button("保存") {
                     saveAndDismiss()
                 }
-                .buttonStyle(.borderedProminent)
+                .primaryActionStyle()
                 .keyboardShortcut(.defaultAction)
                 .disabled(isTesting)
             }
