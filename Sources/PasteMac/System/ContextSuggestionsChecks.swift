@@ -182,7 +182,7 @@ enum ContextSuggestionsChecks {
         return count
     }
 }
-private struct SuggestionCheckFailure: Error { let message: String }
+private struct SuggestionCheckFailure: LocalizedError { let message: String; var errorDescription: String? { message } }
 private actor PartialRecorder {
     var values: [Int] = []
     func record(_ value: Int) { values.append(value) }
