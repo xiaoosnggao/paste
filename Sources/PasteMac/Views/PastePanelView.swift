@@ -13,22 +13,12 @@ struct PastePanelView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // The panel grows upward from a fixed bottom edge, so the deck stays put
-            // while the detail layer is revealed above it.
-            ZStack(alignment: .bottom) {
-                if let detail = model.panelDetail {
-                    PanelDetailView(model: model, detail: detail)
-                        .padding(.horizontal, PanelMetrics.deckHorizontalPadding)
-                        .padding(.bottom, PanelDetailLayout.spacing)
-                        .transition(.opacity)
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-            .clipped()
+            // Detail pages open in their own window above the panel; the panel keeps its height.
+            Spacer(minLength: 0)
             toolbar
             Color.clear.frame(height: PanelMetrics.toolbarDeckSpacing)
             deck.frame(height: PanelMetrics.deckHeight)
-            if model.contextSuggestionsPresented && model.panelDetail == nil {
+            if model.contextSuggestionsPresented {
                 ContextSuggestionsView(model: model)
                     .frame(height: PanelPresentation.suggestionContentHeight + model.suggestionAdditionalHeight)
                     .padding(.top, PanelPresentation.suggestionSpacing)

@@ -29,29 +29,36 @@ enum SnapshotRenderer {
                 model.isSearchVisible = true
                 try await render("panel-search-\(tag)", NSSize(width: screen.width, height: PanelPresentation.baseHeight), radius: DesignTokens.Radius.panel, PastePanelView(model: model))
                 model.isSearchVisible = false
-                let detailHeight = PanelDetailLayout.contentHeight(forScreenHeight: screen.height)
-                model.panelDetailContentHeight = detailHeight
-                let grown = NSSize(width: screen.width, height: PanelPresentation.baseHeight + PanelDetailLayout.spacing + detailHeight)
+                // With a detail window open the panel keeps its height and its own material.
                 let text = model.visibleItems.first { $0.kind == .text }!
                 model.select(text)
-                model.openPanelEditor(text)
-                try await render("detail-edit-\(tag)", grown, radius: DesignTokens.Radius.panel, PastePanelView(model: model))
-                model.closePanelDetail()
-                model.toolInputText = text.text
-                model.toolItemID = text.id
-                model.openPanelDetail(.translate, itemID: text.id)
-                try await render("detail-translate-\(tag)", grown, radius: DesignTokens.Radius.panel, PastePanelView(model: model))
-                model.closePanelDetail()
                 model.openPanelDetail(.intelligence, itemID: text.id)
-                try await render("detail-intelligence-\(tag)", grown, radius: DesignTokens.Radius.panel, PastePanelView(model: model))
-                // As on screen: the panel opens at 320 pt, then grows for the detail layer, with the real material.
-                try await snapshot(PastePanelView(model: model), size: grown, radius: DesignTokens.Radius.panel, appearance: appearance,
-                                   to: directory.appendingPathComponent("detail-grown-native-\(tag)-\(suffix).png"),
-                                   startHeight: PanelPresentation.baseHeight, reduceTransparency: false)
+                try await snapshot(PastePanelView(model: model), size: NSSize(width: screen.width, height: PanelPresentation.baseHeight),
+                                   radius: DesignTokens.Radius.panel, appearance: appearance,
+                                   to: directory.appendingPathComponent("panel-detail-open-native-\(tag)-\(suffix).png"), reduceTransparency: false)
                 count += 1
                 model.closePanelDetail()
             }
             let model = makeModel()
+            // 编辑, 翻译 and 智能 are standalone windows above the panel.
+            let windowSize = NSSize(width: 760, height: 480)
+            if let text = model.visibleItems.first(where: { $0.kind == .text }) {
+                model.select(text)
+                model.openPanelEditor(text)
+                try await render("window-edit", windowSize, PanelDetailWindowView(model: model))
+                model.closePanelDetail()
+                model.toolInputText = text.text
+                model.toolItemID = text.id
+                model.openPanelDetail(.translate, itemID: text.id)
+                try await render("window-translate", windowSize, PanelDetailWindowView(model: model))
+                model.closePanelDetail()
+                model.openPanelDetail(.intelligence, itemID: text.id)
+                try await render("window-intelligence", windowSize, PanelDetailWindowView(model: model))
+                try await snapshot(PanelDetailWindowView(model: model), size: windowSize, radius: DesignTokens.Radius.window, appearance: appearance,
+                                   to: directory.appendingPathComponent("window-intelligence-native-\(suffix).png"), reduceTransparency: false)
+                count += 1
+                model.closePanelDetail()
+            }
             for kind in [ClipKind.text, .image, .file, .link] {
                 guard let item = model.visibleItems.first(where: { $0.kind == kind }) else { continue }
                 try await render("preview-\(kind.rawValue)", NSSize(width: 720, height: 480), PreviewView(model: model, itemID: item.id))
