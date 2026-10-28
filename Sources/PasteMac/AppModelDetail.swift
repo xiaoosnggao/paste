@@ -36,12 +36,12 @@ extension AppModel {
         case .preview: preview(item)
         case .edit: edit(item)
         case .translate:
-            toolsHostedInPanel = true
-            defer { toolsHostedInPanel = false }
             // A card that already has a translation shows it without sending the text again.
-            if item.enrichment?.translation != nil { showToolItem(item) }
-            else if item.kind == .image { recognizeItem(item, translateAfter: true) }
-            else { translateItem(item) }
+            hostToolsInPanel {
+                if item.enrichment?.translation != nil { showToolItem(item) }
+                else if item.kind == .image { recognizeItem(item, translateAfter: true) }
+                else { translateItem(item) }
+            }
         case .intelligence: intelligence(item)
         }
     }
@@ -98,6 +98,13 @@ extension AppModel {
     }
 
     // MARK: Translate page
+
+    /// Runs a tool action started from the panel so its result shows on the translate page.
+    func hostToolsInPanel(_ body: () -> Void) {
+        toolsHostedInPanel = true
+        defer { toolsHostedInPanel = false }
+        body()
+    }
 
     /// Ends a translation hosted in the panel, as closing the tool window did.
     func endPanelTool() {
