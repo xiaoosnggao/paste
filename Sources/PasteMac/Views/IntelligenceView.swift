@@ -45,7 +45,7 @@ struct IntelligenceView: View {
             Spacer(minLength: 0)
         }.padding(16).padding(.top, 28)
         .frame(minWidth: 560, minHeight: 480, alignment: .topLeading)
-        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: DesignTokens.Radius.lg))
         .onDisappear { task?.cancel() }
     }
     private func startAI(_ action: IntelligenceAction) {

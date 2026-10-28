@@ -4,7 +4,7 @@ import SwiftUI
 /// Shared contrast and focus treatment for every editable surface.
 struct PasteboardInputSurface: ViewModifier {
     let focused: Bool
-    var cornerRadius: CGFloat = 7
+    var cornerRadius: CGFloat = DesignTokens.Radius.sm
 
     func body(content: Content) -> some View {
         content

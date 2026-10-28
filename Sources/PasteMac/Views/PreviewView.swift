@@ -23,12 +23,12 @@ struct PreviewView: View {
                 Divider()
                 if value.kind == .image { imageContent(value) }
                 else if value.kind == .color {
-                    RoundedRectangle(cornerRadius: 20).fill(Color(hex: value.text)).frame(maxWidth: .infinity, maxHeight: .infinity)
+                    RoundedRectangle(cornerRadius: DesignTokens.Radius.xl).fill(Color(hex: value.text)).frame(maxWidth: .infinity, maxHeight: .infinity)
                         .overlay(Text(value.text).font(.system(.largeTitle, design: .monospaced)).shadow(radius: 2))
                 } else if value.kind == .file { filesContent(value) }
                 else {
                     if value.kind == .link { linkContent(value) }
-                    ScrollView { Text(value.text).font(.system(size: 16)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
+                    ScrollView { Text(value.text).font(.scaled(.title)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
                 }
                 if value.kind == .image || value.kind == .text || value.kind == .link {
                     ClipEnrichmentView(model: model, item: value)

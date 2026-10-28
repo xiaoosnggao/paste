@@ -38,9 +38,9 @@ struct ContextSuggestionResultPreview: View {
                     }
                 }
             }.scrollIndicators(.never)
-            TextEditor(text: $editedText).font(.system(size: 14))
+            TextEditor(text: $editedText).font(.scaled(.body))
                 .scrollContentBackground(.hidden)
-                .padding(10).background(PanelPalette.surface, in: RoundedRectangle(cornerRadius: 8))
+                .padding(10).background(PanelPalette.surface, in: RoundedRectangle(cornerRadius: DesignTokens.Radius.md))
             HStack {
                 Text(notice ?? "").font(.caption).foregroundStyle(PanelPalette.secondaryText)
                 Spacer()

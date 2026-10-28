@@ -45,8 +45,8 @@ struct PanelControlStyle: ButtonStyle {
         var body: some View {
             configuration.label
                 .foregroundStyle(selected ? PanelPalette.selectionText : PanelPalette.text)
-                .background(selected ? PanelPalette.selection : (hovering || configuration.isPressed ? PanelPalette.hover : .clear), in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(selected ? PanelPalette.selectionBorder : .clear, lineWidth: 1))
+                .background(selected ? PanelPalette.selection : (hovering || configuration.isPressed ? PanelPalette.hover : .clear), in: RoundedRectangle(cornerRadius: DesignTokens.Radius.md))
+                .overlay(RoundedRectangle(cornerRadius: DesignTokens.Radius.md).strokeBorder(selected ? PanelPalette.selectionBorder : .clear, lineWidth: 1))
                 .opacity(configuration.isPressed ? 0.72 : 1)
                 .contentShape(Rectangle())
                 .onHover { hovering = $0 }

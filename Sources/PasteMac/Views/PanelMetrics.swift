@@ -8,7 +8,7 @@ enum PanelMetrics {
     // Panel frame
     static let panelTopPadding: CGFloat = 14
     static let panelBottomPadding: CGFloat = 10
-    static let panelCornerRadius: CGFloat = 25
+    static let panelCornerRadius = DesignTokens.Radius.panel
     static let toolbarHeight: CGFloat = 32
     static let toolbarDeckSpacing: CGFloat = 12
     static let deckHeight: CGFloat = 252
@@ -28,7 +28,7 @@ enum PanelMetrics {
     // Clip card
     static let cardWidth: CGFloat = 230
     static let cardHeight: CGFloat = 232
-    static let cardCornerRadius: CGFloat = 12
+    static let cardCornerRadius = DesignTokens.Radius.lg
     static let cardHeaderHeight: CGFloat = 48
     static let cardContentPadding: CGFloat = 16
 
