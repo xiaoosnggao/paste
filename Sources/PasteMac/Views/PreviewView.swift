@@ -135,13 +135,16 @@ struct PreviewView: View {
                 .overlay(Text(value.text).font(.system(.largeTitle, design: .monospaced)).shadow(radius: 2))
         } else if value.kind == .file { filesContent(value) }
         else {
-            if value.kind == .link { linkContent(value).frame(maxWidth: .infinity, alignment: .leading).windowWell(padding: DesignTokens.Space.sm) }
-            ScrollView {
-                Text(value.text).font(.scaled(.title)).lineSpacing(3).textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            // Stacked: the link card sits above the URL, not beside it.
+            VStack(alignment: .leading, spacing: DesignTokens.Space.sm) {
+                if value.kind == .link { linkContent(value).frame(maxWidth: .infinity, alignment: .leading).windowWell(padding: DesignTokens.Space.sm) }
+                ScrollView {
+                    Text(value.text).font(.scaled(.title)).lineSpacing(3).textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(minHeight: 72, maxHeight: .infinity)
+                .windowWell()
             }
-            .frame(minHeight: 72, maxHeight: .infinity)
-            .windowWell()
         }
     }
     @ViewBuilder private func footer(_ value: ClipItem) -> some View {
