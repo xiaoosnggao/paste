@@ -2,25 +2,32 @@ import AppKit
 import SwiftUI
 import PasteCore
 
+/// The detail layer's edit page. Text lives in a draft on the model, so it survives
+/// Esc, page switches and the panel hiding until it is saved or cancelled.
+/// ⌘S saves (routed by AppDelegate); Return inserts a newline.
 struct EditorView: View {
     @ObservedObject var model: AppModel
-    let item: ClipItem?
+    let itemID: UUID?
     @State private var value: NSAttributedString
     @State private var title: String
     @StateObject private var editor = RichTextEditorController()
+    private let draft: PanelEditorDraft
 
-    init(model: AppModel, item: ClipItem?) {
-        self.model = model; self.item = item
-        let richValue = item?.representations.first(where: { $0.type == "public.rtf" }).flatMap {
-            try? NSAttributedString(data: $0.data, options: [.documentType: NSAttributedString.DocumentType.rtf], documentAttributes: nil)
-        }
-        _value = State(initialValue: richValue ?? NSAttributedString(string: item?.text ?? "", attributes: [.font: NSFont.systemFont(ofSize: 15), .foregroundColor: NSColor.labelColor]))
-        _title = State(initialValue: item?.title ?? "")
+    init(model: AppModel, itemID: UUID?) {
+        self.model = model; self.itemID = itemID
+        let draft = model.panelEditorDrafts[itemID] ?? PanelEditorDraft(item: nil)
+        self.draft = draft
+        _value = State(initialValue: draft.value)
+        _title = State(initialValue: draft.title)
     }
 
+    private var item: ClipItem? { draft.item }
+    private var dirty: Bool { !value.isEqual(to: draft.originalValue) || title != draft.originalTitle }
+
     var body: some View {
-        WindowScaffold(item == nil ? "新建文本" : "编辑文本", subtitle: item?.sourceName) {
-            VStack(alignment: .leading, spacing: WindowMetrics.sectionSpacing) {
+        PanelDetailScaffold(model: model, item: item.flatMap { value in model.snapshot.items.first { $0.id == value.id } },
+                            page: .edit, title: item == nil ? "新建文本" : "编辑文本", subtitle: item?.sourceName) {
+            VStack(alignment: .leading, spacing: DesignTokens.Space.sm) {
                 TextField("标题（可选）", text: $title).textFieldStyle(PasteboardTextFieldStyle())
                 VStack(spacing: 0) {
                     formatBar
@@ -37,12 +44,20 @@ struct EditorView: View {
             }
         } footer: {
             WindowFooterNote("\(value.string.count) 个字符")
+            if dirty {
+                Text("未保存").font(.scaled(.caption)).foregroundStyle(PanelPalette.secondaryText)
+                    .accessibilityLabel("有未保存的修改")
+            }
             Spacer()
-            Button("取消") { model.closeEditor() }.windowCancelAction()
-            Button("保存") { if model.saveRichText(value, title: title, item: item) { model.closeEditor() } }
-                .windowPrimaryAction().disabled(value.string.isEmpty)
+            Text("⌘S 保存 · ↩ 换行 · Esc 收起").font(.scaled(.caption)).foregroundStyle(PanelPalette.secondaryText)
+            Button("取消") { model.cancelPanelEditor() }
+            Button("保存") { model.savePanelEditor() }
+                .buttonStyle(.borderedProminent).tint(PanelPalette.accent).foregroundStyle(PanelPalette.onAccent)
+                .disabled(value.string.isEmpty)
+                .help("保存 (⌘S)")
         }
-        .frame(minWidth: 520, minHeight: 380)
+        .onChange(of: value) { _, next in model.updatePanelEditorDraft(value: next, title: title) }
+        .onChange(of: title) { _, next in model.updatePanelEditorDraft(value: value, title: next) }
     }
 
     private var formatBar: some View {
