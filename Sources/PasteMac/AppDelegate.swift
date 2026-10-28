@@ -267,9 +267,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         value.isReleasedWhenClosed = false
         value.isOpaque = false; value.backgroundColor = .clear
         value.contentView = PanelGlassContainer.make(content: view, frame: NSRect(origin: .zero, size: size), cornerRadius: DesignTokens.Radius.window)
-        value.center()
+        place(value)
         value.delegate = self
         return value
+    }
+    /// Opens a secondary window above the clipboard panel instead of
+    /// centering it behind the status-bar-level panel.
+    private func place(_ value: NSWindow) {
+        let visiblePanel = panelPresented && panel?.isVisible == true ? panel : nil
+        let mouse = NSEvent.mouseLocation
+        guard let screen = visiblePanel?.screen ?? NSScreen.screens.first(where: { $0.frame.contains(mouse) }) ?? NSScreen.main else {
+            value.center(); return
+        }
+        value.setFrameOrigin(AuxiliaryWindowPlacement.origin(size: value.frame.size, visibleFrame: screen.visibleFrame, avoiding: visiblePanel?.frame))
     }
     private func showSettings() {
         // This status-bar-level, nonactivating panel otherwise remains above

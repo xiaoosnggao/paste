@@ -12,41 +12,80 @@ struct IntelligenceView: View {
     @State private var task: Task<Void, Never>?
     @State private var operation = UUID()
     @State private var availability = IntelligenceService.availability
+    private var tooLong: Bool { item.text.count > 2400 }
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("智能处理").font(.headline)
-            Text(item.title.isEmpty ? String(item.text.prefix(80)) : item.title).font(.caption).lineLimit(2).foregroundStyle(.secondary)
-            Text(availability.message).font(.caption).foregroundStyle(.secondary)
-            HStack {
-                ForEach(IntelligenceAction.allCases) { action in
-                    Button(action.rawValue) { startAI(action) }.disabled(busy || !availability.available || item.text.count > 2400)
-                }
-                Button("刷新状态") { availability = IntelligenceService.availability }.disabled(busy)
-            }
-            if item.text.count > 2400 { Text("智能处理最多支持 2400 个字符。请缩短文本后重试。").font(.caption).foregroundStyle(.secondary) }
-            Divider()
-            Text("文本整理").font(.subheadline)
-            HStack {
-                ForEach(LocalTextAction.allCases) { action in Button(action.rawValue) { startLocal(action) }.disabled(busy) }
-            }
-            if busy { HStack { ProgressView().controlSize(.small); Text("正在处理…"); Button("取消") { task?.cancel(); task = nil; operation = UUID(); busy = false } } }
-            if let error { Text(error).foregroundStyle(.orange).font(.caption) }
-            if !result.isEmpty {
-                ScrollView { Text(result).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }.frame(minHeight: 100, maxHeight: 220)
-                HStack {
-                    Button("复制结果") { copyResult() }
-                    Button("保存结果") {
-                        if model.saveText(result, title: "处理结果", item: nil) { savedMessage = "结果已保存，相同内容将合并。" }
-                        else { error = model.statusMessage ?? "保存失败。" }
+        WindowScaffold("智能处理", subtitle: item.title.isEmpty ? String(item.text.prefix(80)) : item.title) {
+            VStack(alignment: .leading, spacing: DesignTokens.Space.lg) {
+                VStack(alignment: .leading, spacing: DesignTokens.Space.sm) {
+                    HStack(spacing: DesignTokens.Space.sm) {
+                        WindowSectionHeader("Apple 智能")
+                        Spacer()
+                        Button("刷新状态", systemImage: "arrow.clockwise") { availability = IntelligenceService.availability }
+                            .labelStyle(.titleAndIcon).buttonStyle(.borderless).controlSize(.small).disabled(busy)
                     }
-                }.disabled(busy)
-                if let savedMessage { Text(savedMessage).font(.caption).foregroundStyle(.secondary) }
+                    Text(availability.message).font(.scaled(.caption)).foregroundStyle(PanelPalette.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: DesignTokens.Space.sm) {
+                        ForEach(IntelligenceAction.allCases) { action in
+                            Button(action.rawValue) { startAI(action) }.disabled(busy || !availability.available || tooLong)
+                        }
+                    }
+                    if tooLong {
+                        Text("智能处理最多支持 2400 个字符。请缩短文本后重试。").font(.scaled(.caption)).foregroundStyle(PanelPalette.secondaryText)
+                    }
+                }
+                VStack(alignment: .leading, spacing: DesignTokens.Space.sm) {
+                    WindowSectionHeader("文本整理")
+                    HStack(spacing: DesignTokens.Space.sm) {
+                        ForEach(LocalTextAction.allCases) { action in Button(action.rawValue) { startLocal(action) }.disabled(busy) }
+                    }
+                }
+                VStack(alignment: .leading, spacing: DesignTokens.Space.sm) {
+                    WindowSectionHeader("结果")
+                    Group {
+                        if result.isEmpty {
+                            Text(busy ? "正在处理…" : "选择上方的操作，结果显示在这里。")
+                                .font(.scaled(.body)).foregroundStyle(PanelPalette.secondaryText)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        } else {
+                            ScrollView {
+                                Text(result).font(.scaled(.body)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                    }
+                    .frame(minHeight: 100, maxHeight: .infinity)
+                    .windowWell()
+                }
             }
-            Spacer(minLength: 0)
-        }.padding(16).padding(.top, 28)
-        .frame(minWidth: 560, minHeight: 480, alignment: .topLeading)
-        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: DesignTokens.Radius.lg))
+        } footer: {
+            footerStatus
+            Spacer()
+            if busy {
+                Button("取消") { task?.cancel(); task = nil; operation = UUID(); busy = false }.windowCancelAction()
+            } else {
+                WindowCloseButton()
+            }
+            if !result.isEmpty {
+                Button("保存结果") {
+                    if model.saveText(result, title: "处理结果", item: nil) { savedMessage = "结果已保存，相同内容将合并。" }
+                    else { error = model.statusMessage ?? "保存失败。" }
+                }.disabled(busy)
+                Button("复制结果") { copyResult() }.windowPrimaryAction().disabled(busy)
+            }
+        }
+        .frame(minWidth: 560, minHeight: 480)
         .onDisappear { task?.cancel() }
+    }
+    @ViewBuilder private var footerStatus: some View {
+        if busy {
+            ProgressView().controlSize(.small)
+            WindowFooterNote("正在处理…")
+        } else if let error {
+            Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.orange).accessibilityHidden(true)
+            Text(error).font(.scaled(.caption)).foregroundStyle(.orange).lineLimit(2).help(error)
+        } else if let savedMessage {
+            WindowFooterNote(savedMessage)
+        }
     }
     private func startAI(_ action: IntelligenceAction) {
         busy = true; error = nil; savedMessage = nil; result = ""; operation = UUID(); let id = operation
