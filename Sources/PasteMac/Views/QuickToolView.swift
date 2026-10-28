@@ -4,6 +4,8 @@ import PasteCore
 
 struct QuickToolView: View {
     @ObservedObject var model: AppModel
+    /// In the panel's detail layer: no window titlebar, compact sizes, footer in the layer's footer.
+    var hosted = false
     @State private var image: NSImage?
     @State private var imageError = false
     @State private var expandedImage = false
@@ -16,8 +18,19 @@ struct QuickToolView: View {
     private var dirty: Bool { item != nil && model.toolInputText != model.toolSourceText }
     private var staleTranslation: Bool { model.toolTranslationIsStale }
     private var hasImage: Bool { item?.kind == .image }
+    private var paneMinHeight: CGFloat { hosted ? 60 : 130 }
 
     var body: some View {
+        Group {
+            if hosted { hostedBody } else { windowBody }
+        }
+        .background { if #available(macOS 15.0, *) { SystemTranslationHost() } }
+        .task(id: item?.fingerprint) { await loadImage() }
+        .background(InputFocusOnAppear { if !hasImage { sourceFocused = true } }.frame(width: 0, height: 0))
+        .onDisappear { model.cancelAutoTranslation() }
+    }
+
+    private var windowBody: some View {
         VStack(spacing: 0) {
             titlebar
             Divider().opacity(0.45)
@@ -32,10 +45,26 @@ struct QuickToolView: View {
         .frame(minWidth: 540, minHeight: 390)
         .ignoresSafeArea(.container, edges: .top)
         .background(Color(nsColor: .windowBackgroundColor).opacity(reduceTransparency ? 1 : 0))
-        .background { if #available(macOS 15.0, *) { SystemTranslationHost() } }
-        .task(id: item?.fingerprint) { await loadImage() }
-        .background(InputFocusOnAppear { if !hasImage { sourceFocused = true } }.frame(width: 0, height: 0))
-        .onDisappear { model.cancelAutoTranslation() }
+    }
+
+    private var hostedBody: some View {
+        PanelDetailScaffold(model: model, item: item, page: .translate, title: "识别与翻译",
+                            subtitle: item.map { $0.title.isEmpty ? String($0.text.prefix(80)) : $0.title }) {
+            VStack(spacing: DesignTokens.Space.sm) {
+                HStack(spacing: DesignTokens.Space.sm) {
+                    services
+                    if model.isDemo { Text("DEMO").font(.scaled(.micro, weight: .medium)).foregroundStyle(.tertiary) }
+                    Image(systemName: "lock.shield").font(.scaled(.caption)).foregroundStyle(.tertiary)
+                        .help("系统服务在本机处理；云服务仅接收当前图片或文字。")
+                    ToolIconButton(symbol: "slider.horizontal.3", label: "服务设置") { model.onSettings?() }
+                }
+                if hasImage { imageStrip }
+                content
+                if let error = model.toolError ?? model.storageError { errorRow(error) }
+            }
+        } footer: {
+            footer
+        }
     }
 
     private var titlebar: some View {
@@ -114,7 +143,7 @@ struct QuickToolView: View {
                 Button {
                     withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { expandedImage.toggle() }
                 } label: {
-                    thumbnail.frame(width: 84, height: 52).clipped()
+                    thumbnail.frame(width: hosted ? 56 : 84, height: hosted ? 34 : 52).clipped()
                         .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))
                 }.buttonStyle(.plain).help("展开原图")
                     .popover(isPresented: $expandedImage, arrowEdge: .top) {
@@ -128,7 +157,7 @@ struct QuickToolView: View {
                     .controlSize(.small).disabled(model.toolBusy)
                 ToolIconButton(symbol: "doc.on.doc", label: "复制原图") { if let item { model.copyToolOriginal(item) } }
             }
-        }.padding(10)
+        }.padding(hosted ? 6 : 10)
             .background(Color(nsColor: .textBackgroundColor).opacity(reduceTransparency ? 1 : 0.3), in: RoundedRectangle(cornerRadius: DesignTokens.Radius.md))
             .overlay { RoundedRectangle(cornerRadius: DesignTokens.Radius.md).strokeBorder(Color(nsColor: .separatorColor).opacity(0.6), lineWidth: 0.5) }
     }
@@ -163,9 +192,9 @@ struct QuickToolView: View {
                                      label: hasImage ? "识别文字" : "原文") { text, composing in
                         model.editToolInput(text, isComposing: composing)
                     }
-                }.frame(minHeight: 130, maxHeight: .infinity)
+                }.frame(minHeight: paneMinHeight, maxHeight: .infinity)
                 Text("\(model.toolInputText.count) 个字符").font(.scaled(.micro).monospacedDigit()).foregroundStyle(.tertiary)
-            }.padding(12).frame(width: (geometry.size.width - 1) / 2, height: geometry.size.height)
+            }.padding(hosted ? DesignTokens.Space.sm : 12).frame(width: (geometry.size.width - 1) / 2, height: geometry.size.height)
             Rectangle().fill(Color(nsColor: .separatorColor).opacity(0.6)).frame(width: 1)
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
@@ -182,7 +211,7 @@ struct QuickToolView: View {
                     ScrollView {
                         Text(translation.translatedText).font(.scaled(.body)).lineSpacing(5)
                             .textSelection(.enabled).fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
-                    }.frame(minHeight: 130, maxHeight: .infinity)
+                    }.frame(minHeight: paneMinHeight, maxHeight: .infinity)
                 } else {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(model.toolBusy ? "正在处理…" : "等待翻译…")
@@ -191,11 +220,11 @@ struct QuickToolView: View {
                             Text("↩ 翻译 · ⇧↩ 换行").font(.scaled(.micro)).foregroundStyle(.tertiary)
                         }
                         Spacer()
-                    }.padding(.top, 7).frame(maxWidth: .infinity, minHeight: 130, maxHeight: .infinity, alignment: .topLeading)
+                    }.padding(.top, 7).frame(maxWidth: .infinity, minHeight: paneMinHeight, maxHeight: .infinity, alignment: .topLeading)
                 }
                 Text(translation.map { shortName($0.provider) } ?? " ")
                     .font(.scaled(.micro)).foregroundStyle(.tertiary).lineLimit(1)
-            }.padding(12).frame(width: (geometry.size.width - 1) / 2, height: geometry.size.height)
+            }.padding(hosted ? DesignTokens.Space.sm : 12).frame(width: (geometry.size.width - 1) / 2, height: geometry.size.height)
         }
         .background(Color(nsColor: .textBackgroundColor).opacity(reduceTransparency ? 1 : 0.3), in: RoundedRectangle(cornerRadius: DesignTokens.Radius.lg))
         .overlay { RoundedRectangle(cornerRadius: DesignTokens.Radius.lg).strokeBorder(Color(nsColor: .separatorColor).opacity(0.7), lineWidth: 0.5) }

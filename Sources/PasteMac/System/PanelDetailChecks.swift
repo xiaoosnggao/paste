@@ -66,6 +66,25 @@ enum PanelDetailChecks {
         try check(PanelDetailPage.intelligence.isAvailable(for: text) && !PanelDetailPage.intelligence.isAvailable(for: image),
                   "smart page availability differs from the preview button")
         try check([image, file, text, empty].allSatisfy { PanelDetailPage.preview.isAvailable(for: $0) }, "preview was unavailable for a card")
+
+        typealias K = PanelDetailKey
+        func key(_ page: PanelDetailPage, _ code: UInt16, _ flags: NSEvent.ModifierFlags = [], _ chars: String? = nil,
+                 editing: Bool = false, composing: Bool = false, field: Bool = false) -> K? {
+            K.resolve(page: page, keyCode: code, flags: flags, key: chars, textEditing: editing, composing: composing, fieldEditor: field)
+        }
+        try check(key(.edit, 1, .command, "s", editing: true) == .save, "⌘S did not save from the editor")
+        try check(key(.edit, 1, .command, "s", editing: true, field: true) == .save, "⌘S did not save from the title field")
+        try check(key(.edit, 1, .command, "s", editing: true, composing: true) == nil, "⌘S interrupted an input method")
+        try check(key(.edit, 36, editing: true) == nil, "Return in the editor did not insert a newline")
+        try check(key(.edit, 36, .shift, editing: true) == nil, "⇧Return in the editor was taken")
+        try check(key(.edit, 36) == .ignore, "Return outside the editor pasted a card while editing")
+        try check(key(.preview, 1, .command, "s") == nil && key(.translate, 1, .command, "s") == nil, "⌘S was taken outside the edit page")
+        try check(key(.translate, 36, editing: true) == .translate, "Return in the translate page did not translate")
+        try check(key(.translate, 36, .shift, editing: true) == nil, "⇧Return in the translate page was not a newline")
+        try check(key(.translate, 36, editing: true, composing: true) == nil, "Return confirmed a composition and translated")
+        try check(key(.translate, 36, editing: true, field: true) == nil, "Return in the search field translated")
+        try check(key(.translate, 15, .command, "r") == .retry, "⌘R did not retry on the translate page")
+        try check(key(.preview, 36) == nil && key(.intelligence, 36) == nil, "Return changed on the preview or smart page")
         return count
     }
 }

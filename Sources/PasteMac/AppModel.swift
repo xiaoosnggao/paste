@@ -18,6 +18,10 @@ final class AppModel: ObservableObject {
     /// The detail card height for the panel's current screen.
     @Published var panelDetailContentHeight = PanelDetailLayout.contentHeight
     var onPanelDetailChange: (() -> Void)?
+    /// Unsaved editor text per card (nil key: a new text). Kept while the panel hides.
+    var panelEditorDrafts: [UUID?: PanelEditorDraft] = [:]
+    /// Set while a detail page starts a translation, so the tool shows in the panel instead of its window.
+    var toolsHostedInPanel = false
     @Published var usesRecommendations = false { didSet { cachedVisibleItems = nil } }
     private var cachedVisibleItems: [ClipItem]?
     private var cachedRecommendationTarget: String?
