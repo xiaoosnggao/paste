@@ -5,6 +5,15 @@ import PasteCore
 /// The detail layer above the deck. It replaces the editor, smart and tool
 /// windows when they start from the panel, so the panel stays the one place
 /// a card is worked on. Tools started by a global shortcut still use their window.
+/// The detail window's root: follows the model so page switches reuse the window.
+struct PanelDetailWindowView: View {
+    @ObservedObject var model: AppModel
+    var body: some View {
+        if let detail = model.panelDetail { PanelDetailView(model: model, detail: detail) }
+        else { Color.clear }
+    }
+}
+
 struct PanelDetailView: View {
     @ObservedObject var model: AppModel
     let detail: PanelDetailState
@@ -20,11 +29,8 @@ struct PanelDetailView: View {
             }
         }
         .id(detail)
-        .frame(maxWidth: PanelDetailLayout.maxContentWidth)
-        .frame(height: model.panelDetailContentHeight)
-        .background(PanelPalette.canvas.opacity(reduceTransparency ? 1 : 0.86), in: RoundedRectangle(cornerRadius: DesignTokens.Radius.xl))
-        .overlay { RoundedRectangle(cornerRadius: DesignTokens.Radius.xl).strokeBorder(PanelPalette.border.opacity(0.45), lineWidth: 0.75) }
-        .shadow(color: .black.opacity(0.18), radius: 8, y: 3)
+        // A standalone window above the panel; the window's glass is the only background.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("卡片详情")
     }
@@ -37,16 +43,19 @@ struct PanelDetailScaffold<Content: View, Footer: View>: View {
     let page: PanelDetailPage
     let title: String
     var subtitle: String?
+    /// Hidden when it would only be an empty bar.
+    var showsFooter = true
     let content: Content
     let footer: Footer
 
-    init(model: AppModel, item: ClipItem?, page: PanelDetailPage, title: String, subtitle: String? = nil,
+    init(model: AppModel, item: ClipItem?, page: PanelDetailPage, title: String, subtitle: String? = nil, showsFooter: Bool = true,
          @ViewBuilder content: () -> Content, @ViewBuilder footer: () -> Footer) {
         self.model = model
         self.item = item
         self.page = page
         self.title = title
         self.subtitle = subtitle
+        self.showsFooter = showsFooter
         self.content = content()
         self.footer = footer()
     }
@@ -60,12 +69,14 @@ struct PanelDetailScaffold<Content: View, Footer: View>: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .padding(.horizontal, DesignTokens.Space.lg)
                 .padding(.vertical, DesignTokens.Space.md)
-            Divider().opacity(0.45)
-            HStack(spacing: DesignTokens.Space.sm) { footer }
-                .font(.scaled(.body))
-                .controlSize(.regular)
-                .padding(.horizontal, DesignTokens.Space.lg)
-                .frame(height: PanelDetailLayout.footerHeight)
+            if showsFooter {
+                Divider().opacity(0.45)
+                HStack(spacing: DesignTokens.Space.sm) { footer }
+                    .font(.scaled(.body))
+                    .controlSize(.regular)
+                    .padding(.horizontal, DesignTokens.Space.lg)
+                    .frame(height: PanelDetailLayout.footerHeight)
+            }
         }
         .foregroundStyle(PanelPalette.text)
         .tint(PanelPalette.accent)
@@ -73,22 +84,28 @@ struct PanelDetailScaffold<Content: View, Footer: View>: View {
 
     private var header: some View {
         HStack(spacing: DesignTokens.Space.sm) {
-            Button { model.closePanelDetail() } label: {
-                Image(systemName: "xmark").font(.scaled(.label, weight: .semibold))
-                    .frame(width: 24, height: 24).contentShape(Rectangle())
-            }
-            .buttonStyle(.plain).foregroundStyle(PanelPalette.secondaryText)
-            .help("关闭详情 (Esc)").accessibilityLabel("关闭详情")
             if let item { SourceIcon(item: item).frame(width: 20, height: 20).accessibilityHidden(true) }
-            Text(title).font(.scaled(.label, weight: .semibold)).lineLimit(1).accessibilityAddTraits(.isHeader)
-            if let subtitle, !subtitle.isEmpty {
-                Text(subtitle).font(.scaled(.caption)).foregroundStyle(PanelPalette.secondaryText).lineLimit(1).truncationMode(.middle)
+            // With a card, the page bar names the page; the header names the card once.
+            let heading = item.map(Self.cardTitle) ?? title
+            Text(heading).font(.scaled(.label, weight: .semibold)).lineLimit(1).truncationMode(.tail)
+                .help(heading).layoutPriority(1).accessibilityAddTraits(.isHeader)
+                .accessibilityLabel(item == nil ? title : "\(title)：\(heading)")
+            if let detail = item?.sourceName ?? subtitle, !detail.isEmpty {
+                Text(detail).font(.scaled(.caption)).foregroundStyle(PanelPalette.secondaryText).lineLimit(1).truncationMode(.tail)
             }
             Spacer(minLength: DesignTokens.Space.md)
-            if let item { PanelDetailPageBar(model: model, item: item, current: page) }
+            if let item { PanelDetailPageBar(model: model, item: item, current: page).fixedSize() }
         }
-        .padding(.horizontal, DesignTokens.Space.md)
+        // The window's own close button sits at the leading edge; Esc closes too.
+        .padding(.leading, WindowMetrics.trafficLightInset)
+        .padding(.trailing, DesignTokens.Space.md)
         .frame(height: PanelDetailLayout.headerHeight)
+    }
+
+    static func cardTitle(_ item: ClipItem) -> String {
+        let raw = item.title.isEmpty ? String(item.text.prefix(80)) : item.title
+        let line = raw.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
+        return line.isEmpty ? item.kind.displayName : line
     }
 }
 
@@ -100,7 +117,7 @@ struct PanelDetailPageBar: View {
 
     var body: some View {
         HStack(spacing: DesignTokens.Space.xs) {
-            ForEach(PanelDetailPage.allCases.filter { $0.isAvailable(for: item) }) { page in
+            ForEach(PanelDetailPage.layerPages.filter { $0.isAvailable(for: item) }) { page in
                 let selected = page == current
                 Button { model.showDetailPage(page, for: item) } label: {
                     Label(page.title, systemImage: page.systemImage)

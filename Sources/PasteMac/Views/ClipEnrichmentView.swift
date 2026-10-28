@@ -10,7 +10,8 @@ struct ClipEnrichmentView: View {
     @State private var ocrDraft = ""
     @State private var editingSource = ""
     private var current: ClipItem? { model.snapshot.items.first { $0.id == item.id } }
-    private var disclosure: String {
+    private var disclosure: String { Self.disclosure(for: item, model: model) }
+    static func disclosure(for item: ClipItem, model: AppModel) -> String {
         let configuration = model.toolConfiguration
         let ocr = configuration.ocrProvider == .system
             ? "系统识别在本机处理图片。"

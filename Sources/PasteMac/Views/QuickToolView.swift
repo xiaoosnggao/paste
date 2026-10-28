@@ -48,12 +48,10 @@ struct QuickToolView: View {
     }
 
     private var hostedBody: some View {
-        PanelDetailScaffold(model: model, item: item, page: .translate, title: "识别与翻译",
-                            subtitle: item.map { $0.title.isEmpty ? String($0.text.prefix(80)) : $0.title }) {
+        PanelDetailScaffold(model: model, item: item, page: .translate, title: "识别与翻译") {
             VStack(spacing: DesignTokens.Space.sm) {
                 HStack(spacing: DesignTokens.Space.sm) {
                     services
-                    if model.isDemo { Text("DEMO").font(.scaled(.micro, weight: .medium)).foregroundStyle(.tertiary) }
                     Image(systemName: "lock.shield").font(.scaled(.caption)).foregroundStyle(.tertiary)
                         .help("系统服务在本机处理；云服务仅接收当前图片或文字。")
                     ToolIconButton(symbol: "slider.horizontal.3", label: "服务设置") { model.onSettings?() }
@@ -81,14 +79,17 @@ struct QuickToolView: View {
 
     private var services: some View {
         HStack(spacing: 8) {
-            Menu {
-                Button("截图识别") { model.performTool(.screenshotOCR) }
-                Button("截图翻译") { model.performTool(.screenshotTranslate) }
-            } label: {
-                Label("截图翻译", systemImage: "camera.viewfinder").font(.scaled(.label, weight: .medium))
-            } primaryAction: { model.performTool(.screenshotTranslate) }
-                .fixedSize().controlSize(.small).help("框选屏幕区域后自动识别并翻译")
-            Divider().frame(height: 12)
+            // In the panel the toolbar's 截图 and the ⋯ menu already start screenshots.
+            if !hosted {
+                Menu {
+                    Button("截图识别") { model.performTool(.screenshotOCR) }
+                    Button("截图翻译") { model.performTool(.screenshotTranslate) }
+                } label: {
+                    Label("截图翻译", systemImage: "camera.viewfinder").font(.scaled(.label, weight: .medium))
+                } primaryAction: { model.performTool(.screenshotTranslate) }
+                    .fixedSize().controlSize(.small).help("框选屏幕区域后自动识别并翻译")
+                Divider().frame(height: 12)
+            }
             if hasImage {
                 Menu {
                     Picker("识别服务", selection: ocrSelection) {
@@ -259,7 +260,7 @@ struct QuickToolView: View {
                         Text(translation == nil ? "翻译" : "重新翻译")
                         Text("↩").opacity(0.65)
                     }.font(.scaled(.label, weight: .medium)).padding(.horizontal, 5)
-                }.buttonStyle(.borderedProminent).tint(PanelPalette.accent).foregroundStyle(PanelPalette.onAccent).controlSize(.large).disabled(!hasImage && model.toolInputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }.primaryActionStyle().disabled(!hasImage && model.toolInputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     .help("停止输入0.75秒自动翻译；按回车立即翻译")
             }
         }.frame(minHeight: 32)
