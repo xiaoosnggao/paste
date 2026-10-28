@@ -44,6 +44,11 @@ enum SnapshotRenderer {
                 model.closePanelDetail()
                 model.openPanelDetail(.intelligence, itemID: text.id)
                 try await render("detail-intelligence-\(tag)", grown, radius: DesignTokens.Radius.panel, PastePanelView(model: model))
+                // As on screen: the panel opens at 320 pt, then grows for the detail layer, with the real material.
+                try await snapshot(PastePanelView(model: model), size: grown, radius: DesignTokens.Radius.panel, appearance: appearance,
+                                   to: directory.appendingPathComponent("detail-grown-native-\(tag)-\(suffix).png"),
+                                   startHeight: PanelPresentation.baseHeight, reduceTransparency: false)
+                count += 1
                 model.closePanelDetail()
             }
             let model = makeModel()
@@ -91,20 +96,28 @@ enum SnapshotRenderer {
         return model
     }
 
-    private static func snapshot<V: View>(_ view: V, size: NSSize, radius: CGFloat, appearance: NSAppearance, to url: URL) async throws {
+    private static func snapshot<V: View>(_ view: V, size: NSSize, radius: CGFloat, appearance: NSAppearance, to url: URL,
+                                          startHeight: CGFloat? = nil, reduceTransparency: Bool = true) async throws {
         let frame = NSRect(origin: .zero, size: size)
+        let initial = NSRect(origin: .zero, size: NSSize(width: size.width, height: startHeight ?? size.height))
         let window = SnapshotWindow(contentRect: NSRect(origin: NSPoint(x: -10_000, y: -10_000), size: size), styleMask: [.borderless], backing: .buffered, defer: false)
         window.appearance = appearance
         window.isReleasedWhenClosed = false
         window.backgroundColor = appearance.name == .darkAqua ? NSColor(white: 0.12, alpha: 1) : NSColor(white: 0.93, alpha: 1)
         let content = PanelGlassContainer.make(content: view.environment(\.colorScheme, appearance.name == .darkAqua ? .dark : .light),
-                                               frame: frame, cornerRadius: radius, reduceTransparency: true)
+                                               frame: initial, cornerRadius: radius, reduceTransparency: reduceTransparency)
         let root = NSView(frame: frame)
         root.wantsLayer = true
         root.layer?.backgroundColor = window.backgroundColor.cgColor
-        content.frame = frame
+        content.frame = initial
+        content.autoresizingMask = [.width, .height]
         root.addSubview(content)
         window.contentView = root
+        if startHeight != nil {
+            root.layoutSubtreeIfNeeded()
+            try await Task.sleep(nanoseconds: 150_000_000)
+            content.frame = frame
+        }
         window.orderFrontRegardless()
         window.makeKey()
         for _ in 0..<4 {
