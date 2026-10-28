@@ -25,7 +25,7 @@ struct EditorView: View {
     private var dirty: Bool { !value.isEqual(to: draft.originalValue) || title != draft.originalTitle }
 
     var body: some View {
-        PanelDetailScaffold(model: model, item: item.flatMap { value in model.snapshot.items.first { $0.id == value.id } },
+        PanelDetailScaffold(model: model, item: item.flatMap { original in model.snapshot.items.first { $0.id == original.id } },
                             page: .edit, title: item == nil ? "新建文本" : "编辑文本", subtitle: item?.sourceName) {
             VStack(alignment: .leading, spacing: DesignTokens.Space.sm) {
                 TextField("标题（可选）", text: $title).textFieldStyle(PasteboardTextFieldStyle())
