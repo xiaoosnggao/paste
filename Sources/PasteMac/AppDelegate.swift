@@ -54,6 +54,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private let selectedTextCapture = SelectedTextCapture()
     private var permissionResumeTask: Task<Void, Never>?
     private var toolKeyMonitor: Any?
+    private var previewWindow: NSWindow?
+    private var previewKeyMonitor: Any?
     private var toolClickMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -64,7 +66,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         AppIntegration.shared.openPanel = { [weak self] in self?.showPanel() }
         if !demo { PasteboardShortcuts.updateAppShortcutParameters() }
         model.onClose = { [weak self] in self?.hidePanel(restoreTarget: true) }
-        model.onPreparePaste = { [weak self] in await self?.hidePanelForPaste() }
+        model.onPreparePaste = { [weak self] in
+            // Pasting from the preview window closes it, as pasting closes the panel.
+            self?.model.closePreview()
+            await self?.hidePanelForPaste()
+        }
+        model.onPreviewClose = { [weak self] in self?.previewWindow?.close() }
+        model.onRevealPanel = { [weak self] in
+            guard let self else { return }
+            if self.panelPresented { self.panel?.makeKeyAndOrderFront(nil) } else { self.showPanel(rememberTarget: false) }
+        }
         model.onPasteFailure = { [weak self] in self?.showPanel(rememberTarget: false) }
         model.onSuggestionPreview = { [weak self] result in
             guard let self else { return }
@@ -318,11 +329,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         if let item, model.selectedIDs.isEmpty, model.visibleItems.contains(where: { $0.id == item.id }) { model.select(item) }
         model.openPanelEditor(item)
     }
-    /// Preview opens in the panel's detail layer instead of a window.
+    /// Preview opens its own window above the panel. ← and → in it switch cards,
+    /// so an open window is reused instead of reopened.
     private func showPreview(_ item: ClipItem) {
-        // Showing the panel selects the first card when nothing is selected; select this one instead so the preview stays on it.
         if model.selectedIDs.isEmpty, model.visibleItems.contains(where: { $0.id == item.id }) { model.select(item) }
-        model.openPanelDetail(.preview, itemID: item.id)
+        let title = item.title.isEmpty ? item.kind.displayName : String(item.title.prefix(80))
+        if let previewWindow, previewWindow.isVisible {
+            previewWindow.title = title
+        } else {
+            previewWindow?.close()
+            previewWindow = window(title: title, size: .init(width: 720, height: 480), view: PreviewWindowView(model: model))
+        }
+        NSApp.activate()
+        previewWindow?.makeKeyAndOrderFront(nil)
     }
     private func showStack() {
         model.pasteEngine.rememberTarget()
@@ -494,6 +513,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             if event.window === self.panel { self.closeUnpinnedTools() }
             return event
         }
+        // Preview window: ← → switch cards, Space closes like Quick Look. Esc and Return use its buttons.
+        previewKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, let preview = self.previewWindow, event.window === preview else { return event }
+            if let text = preview.firstResponder as? NSTextView, text.hasMarkedText() || text.isEditable { return event }
+            guard event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty else { return event }
+            switch event.keyCode {
+            case 123: self.model.movePreview(-1); return nil
+            case 124: self.model.movePreview(1); return nil
+            case 49: if !event.isARepeat { self.model.closePreview() }; return nil
+            default: return event
+            }
+        }
         toolKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, event.window == self.toolWindow else { return event }
             if let editor = self.toolWindow?.firstResponder as? NSTextView, editor.hasMarkedText() { return event }
@@ -572,11 +603,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         case 123: model.moveSelection(-1); return true
         case 124: model.moveSelection(1); return true
         case 36, 76:
-            // The preview can show a card outside the selection, such as a suggestion's source.
-            if model.panelDetail?.page == .preview, let item = model.panelDetailItem { model.activate(item, plainText: flags.contains(.shift)) }
-            else { model.activateSelected(plainText: flags.contains(.shift)) }
+            model.activateSelected(plainText: flags.contains(.shift))
             return true
-        case 49: model.togglePreviewDetail(); return true
+        case 49: model.togglePreview(); return true
         case 51, 117: model.deleteSelected(); return true
         default: return false
         }
@@ -646,6 +675,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     func windowWillClose(_ notification: Notification) {
         if notification.object as? NSWindow === suggestionResultWindow { model.releaseHistory(for: "suggestion") }
         if notification.object as? NSWindow === toolWindow { model.toolSessionActive = false; model.cancelToolOperation() }
+        if notification.object as? NSWindow === previewWindow {
+            model.previewWindowClosed()
+            // Keys go back to the panel so ← → and Space keep working there.
+            if panelPresented, panel?.isVisible == true { panel?.makeKey() }
+        }
     }
     private func matchesLegacyShortcut(_ key: UInt32, _ flags: UInt32, stack: Bool) -> Bool {
         let defaults = UserDefaults.standard
@@ -696,7 +730,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         guard selectionTask == nil, screenshotTask == nil, !screenshotCoordinator.isCapturing, !model.isPasting else { return }
         model.toolSessionActive = false
         model.cancelToolOperation(); model.toolItemID = nil; model.toolInputText = ""; model.toolError = nil; model.toolStatus = nil
-        toolWindow?.orderOut(nil); settingsWindow?.orderOut(nil)
+        toolWindow?.orderOut(nil); previewWindow?.orderOut(nil); settingsWindow?.orderOut(nil)
         screenshotTask = Task { @MainActor [weak self] in
             guard let self else { return }
             defer { self.screenshotTask = nil }
@@ -765,7 +799,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
     private func showToolPermissionGuide(_ kind: PermissionGuideKind, onAuthorized: @escaping () -> Void) {
         model.toolSessionActive = false
-        hidePanel(); toolWindow?.orderOut(nil)
+        hidePanel(); toolWindow?.orderOut(nil); previewWindow?.orderOut(nil)
         if accessibilityGuide == nil { accessibilityGuide = AccessibilityGuide(model: model) }
         accessibilityGuide?.show(kind: kind, onAuthorized: onAuthorized)
     }

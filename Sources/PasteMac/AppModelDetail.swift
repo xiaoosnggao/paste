@@ -10,16 +10,64 @@ extension AppModel {
     }
 
     func openPanelDetail(_ page: PanelDetailPage, itemID: UUID?) {
+        // Preview is a window again, not a page of the layer.
+        if page == .preview {
+            if let item = snapshot.items.first(where: { $0.id == itemID }) { preview(item) }
+            return
+        }
         panelDetail = PanelDetailState(itemID: itemID, page: page)
     }
 
     func closePanelDetail() { panelDetail = nil }
 
-    /// Space: open the preview of the selected card, or close it again.
-    func togglePreviewDetail() {
-        if panelDetail?.page == .preview { closePanelDetail(); return }
+    /// The card the preview window shows, read live so edits and deletions appear at once.
+    var previewItem: ClipItem? {
+        guard let id = previewItemID else { return nil }
+        return snapshot.items.first { $0.id == id }
+    }
+
+    /// Space: open the preview window for the selected card, or close it again.
+    func togglePreview() {
+        if previewItemID != nil { closePreview(); return }
         selectFirstIfNeeded()
         if let item = selectedItems.first { preview(item) }
+    }
+
+    /// Closes the preview window and releases its payload.
+    func closePreview() {
+        guard previewItemID != nil else { return }
+        previewWindowClosed()
+        onPreviewClose?()
+    }
+
+    /// The window closed by its own button, Esc or the title bar.
+    func previewWindowClosed() {
+        previewItemID = nil
+        releaseHistory(for: "preview")
+    }
+
+    /// ← and → in the preview window: show the previous or next card of the list.
+    /// The selection follows, so the panel shows the same card when it returns.
+    func movePreview(_ delta: Int) {
+        let items = visibleItems
+        guard let id = previewItemID, let index = items.firstIndex(where: { $0.id == id }) else {
+            // A card outside the list, such as a suggestion's source, starts from the selection.
+            if previewItemID != nil { moveSelection(delta) }
+            return
+        }
+        let next = index + delta
+        guard items.indices.contains(next) else { return }
+        select(items[next])
+        if previewItemID != items[next].id { preview(items[next]) }
+    }
+
+    /// The preview window's 编辑, 翻译 and 智能 buttons: close it and open the page in the panel.
+    func openFromPreview(_ page: PanelDetailPage, item: ClipItem) {
+        guard page != .preview, page.isAvailable(for: item) else { return }
+        closePreview()
+        onRevealPanel?()
+        if visibleItems.contains(where: { $0.id == item.id }) { select(item) }
+        showDetailPage(page, for: item)
     }
 
     /// Opens a page for the selected card when the page applies to it.
@@ -46,11 +94,11 @@ extension AppModel {
         }
     }
 
-    /// ← and → move the selection; the preview follows the selected card.
-    func syncPanelDetailToSelection() {
-        guard let detail = panelDetail, detail.page == .preview, selectedIDs.count == 1,
-              let id = selectedIDs.first, id != detail.itemID else { return }
-        panelDetail?.itemID = id
+    /// ← and → in the panel move the selection; an open preview window follows the selected card.
+    func syncPreviewToSelection() {
+        guard let current = previewItemID, selectedIDs.count == 1, let id = selectedIDs.first, id != current,
+              let item = snapshot.items.first(where: { $0.id == id }) else { return }
+        preview(item)
     }
 
     /// The panel hid, for example after an outside click or a paste.
