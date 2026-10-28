@@ -119,7 +119,7 @@ struct PastePanelView: View {
             }
             Text(notice.text).font(.system(size: 11)).lineLimit(2)
             if model.storageError != nil {
-                Button("重试保存", action: model.retrySave).buttonStyle(.plain).foregroundStyle(Color.accentColor)
+                Button("重试保存", action: model.retrySave).buttonStyle(.plain).foregroundStyle(PanelPalette.accent)
             } else if notice != .copied {
                 Button { model.notice = nil; model.pasteIssue = nil } label: { Image(systemName: "xmark") }
                     .buttonStyle(.plain).accessibilityLabel("关闭提示")

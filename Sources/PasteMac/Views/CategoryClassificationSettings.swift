@@ -29,7 +29,7 @@ struct CategoryClassificationSettings: View {
                     model.setClassificationDetails(board.id, description: description, enabled: enabled,
                         keywords: keywords.components(separatedBy: CharacterSet(charactersIn: ",，")).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })
                     dismiss()
-                }.buttonStyle(.borderedProminent).foregroundStyle(PanelPalette.canvas).keyboardShortcut(.defaultAction)
+                }.buttonStyle(.borderedProminent).tint(PanelPalette.accent).foregroundStyle(PanelPalette.onAccent).keyboardShortcut(.defaultAction)
             }
         }.padding(24).frame(width: 420)
         .onAppear { description = board.classificationDescription ?? ""; keywords = (board.classificationKeywords ?? []).joined(separator: "，"); enabled = board.automaticClassification != false }

@@ -56,7 +56,7 @@ struct ContextSuggestionResultPreview: View {
                 }.disabled(saved)
                 Button("粘贴") {
                     if !model.saveContextSuggestionPreview(result, text: editedText, paste: true) { notice = "无法保存结果，请重试。" }
-                }.buttonStyle(.borderedProminent).foregroundStyle(PanelPalette.canvas)
+                }.buttonStyle(.borderedProminent).tint(PanelPalette.accent).foregroundStyle(PanelPalette.onAccent)
             }
         }
         .padding(24).frame(minWidth: 560, minHeight: 420)
