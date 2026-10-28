@@ -47,8 +47,9 @@ enum ContextSuggestionPreview {
         panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = true
         panel.isReleasedWhenClosed = false
         panel.contentView = PanelGlassContainer.make(content: PastePanelView(model: value), frame: NSRect(origin: .zero, size: frame.size))
-        value.onSuggestionPanelChange = { [weak panel] expanded in
-            guard let panel else { return }
+        value.onSuggestionPanelChange = { [weak panel, weak value] _ in
+            guard let panel, let value else { return }
+            let expanded = value.suggestionStripAvailable
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = 0.24
                 panel.animator().setFrame(PanelPresentation.visibleFrame(on: previewScreen, suggestionsVisible: expanded), display: true)

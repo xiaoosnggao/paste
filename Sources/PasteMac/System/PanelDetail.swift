@@ -7,11 +7,11 @@ import PasteCore
 /// clipboard panel. Preview opens its own window; its case stays so the page
 /// bar, hover actions and context menu can offer it next to the others.
 enum PanelDetailPage: String, CaseIterable, Identifiable, Sendable {
-    case preview, edit, translate, intelligence
+    case preview, edit, translate, intelligence, suggestions
 
     var id: String { rawValue }
     /// The layer's own pages. Edit comes first and is the default.
-    static let layerPages: [PanelDetailPage] = [.edit, .translate, .intelligence]
+    static let layerPages: [PanelDetailPage] = [.edit, .translate, .intelligence, .suggestions]
     /// Whether the page opens in the panel instead of the preview window.
     var opensInPanel: Bool { self != .preview }
     var title: String {
@@ -20,6 +20,7 @@ enum PanelDetailPage: String, CaseIterable, Identifiable, Sendable {
         case .edit: "编辑"
         case .translate: "翻译"
         case .intelligence: "智能"
+        case .suggestions: "建议"
         }
     }
     var systemImage: String {
@@ -27,7 +28,8 @@ enum PanelDetailPage: String, CaseIterable, Identifiable, Sendable {
         case .preview: "eye"
         case .edit: "pencil"
         case .translate: "character.bubble"
-        case .intelligence: "sparkles"
+        case .intelligence: "brain"
+        case .suggestions: "sparkles"
         }
     }
     /// The shortcut shown next to the page name.
@@ -37,6 +39,7 @@ enum PanelDetailPage: String, CaseIterable, Identifiable, Sendable {
         case .edit: "⌘E"
         case .translate: "⌘T"
         case .intelligence: "⌘I"
+        case .suggestions: "⌘J"
         }
     }
     /// The page a plain ⌘ letter opens while no text field has focus.
@@ -46,6 +49,7 @@ enum PanelDetailPage: String, CaseIterable, Identifiable, Sendable {
         case "e": .edit
         case "t": .translate
         case "i": .intelligence
+        case "j": .suggestions
         default: nil
         }
     }
@@ -57,6 +61,8 @@ enum PanelDetailPage: String, CaseIterable, Identifiable, Sendable {
         case .edit: item.kind != .image && item.kind != .file
         case .translate: item.kind == .image || !item.text.isEmpty
         case .intelligence: item.kind == .text || item.kind == .link
+        // Also for multi-select and cards without text; the page explains what is missing.
+        case .suggestions: true
         }
     }
 }
@@ -150,7 +156,7 @@ enum PanelDetailKey: Equatable {
             if flags == .command, key == "r" { return .retry }
             if returnKey, flags.isEmpty, !fieldEditor { return .translate }
             return nil
-        case .preview, .intelligence:
+        case .preview, .intelligence, .suggestions:
             return nil
         }
     }

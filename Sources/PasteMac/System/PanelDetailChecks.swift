@@ -48,7 +48,7 @@ enum PanelDetailChecks {
                   "Esc without detail stopped hiding the panel")
 
         try check(PanelDetailPage.forCommandKey("e") == .edit && PanelDetailPage.forCommandKey("t") == .translate
-                  && PanelDetailPage.forCommandKey("i") == .intelligence, "page shortcuts changed")
+                  && PanelDetailPage.forCommandKey("i") == .intelligence && PanelDetailPage.forCommandKey("j") == .suggestions, "page shortcuts changed")
         for key in ["c", "a", "z", "n", "o", "f", ","] {
             try check(PanelDetailPage.forCommandKey(key) == nil, "page shortcut took over ⌘\(key)")
         }

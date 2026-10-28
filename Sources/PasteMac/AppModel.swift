@@ -51,6 +51,9 @@ final class AppModel: ObservableObject {
         didSet {
             if let data = try? JSONEncoder().encode(toolConfiguration) { toolDefaults.set(data, forKey: "cloudToolConfiguration.v1") }
             scheduleContextSuggestions()
+            // The strip has a fixed height but only exists while suggestions can run.
+            if toolConfiguration.contextSuggestionsEnabled != oldValue.contextSuggestionsEnabled
+                || toolConfiguration != oldValue { onSuggestionPanelChange?(contextSuggestionsPresented) }
             let ocrChanged = !toolConfiguration.hasSameOCRSettings(as: oldValue)
             let translationChanged = !toolConfiguration.hasSameTranslationSettings(as: oldValue)
             if ocrChanged || translationChanged {
@@ -65,6 +68,14 @@ final class AppModel: ObservableObject {
     var onSuggestionPreview: ((ContextSuggestionPreviewResult) -> Void)?
     var multiCardSummaryCache: [(ContextSuggestionRequestKey, MultiCardContextSummary)] = []
     @Published var contextSuggestions: [ContextSuggestion] = []
+    /// Instant local suggestions shown until (or instead of) the AI reply.
+    @Published var ruleSuggestions: [ContextSuggestion] = []
+    /// AI suggestions that have streamed in so far for the pending request.
+    @Published var partialContextSuggestions: [ContextSuggestion] = []
+    lazy var suggestionDiskCache = SuggestionDiskCache(directory: isDemo ? nil : storageDirectory)
+    var suggestionPrecomputeTask: Task<Void, Never>?
+    var suggestionPrecomputeInFlight: (key: String, task: Task<[ContextSuggestion]?, Never>)?
+    var suggestionPrecomputeDelayNanoseconds: UInt64 = 2_000_000_000
     @Published var contextSuggestionsLoading = false {
         didSet {
             if contextSuggestionsLoading != oldValue { onSuggestionPanelChange?(contextSuggestionsPresented) }
@@ -160,7 +171,7 @@ final class AppModel: ObservableObject {
     var onShortcut: ((UInt32, UInt32) -> Bool)?
     var onStackShortcut: ((UInt32, UInt32) -> Bool)?
 
-    init(isDemo: Bool = false, storageDirectory: URL? = nil, bridge: ClipboardBridge? = nil, toolOperations: ToolOperations? = nil, toolDefaults: UserDefaults = .standard, pasteEngine: PasteEngine? = nil, autoTranslationDelayNanoseconds: UInt64 = 750_000_000, suggestionOperations: ContextSuggestionOperations? = nil, suggestionDelayNanoseconds: UInt64 = 250_000_000) {
+    init(isDemo: Bool = false, storageDirectory: URL? = nil, bridge: ClipboardBridge? = nil, toolOperations: ToolOperations? = nil, toolDefaults: UserDefaults = .standard, pasteEngine: PasteEngine? = nil, autoTranslationDelayNanoseconds: UInt64 = 750_000_000, suggestionOperations: ContextSuggestionOperations? = nil, suggestionDelayNanoseconds: UInt64 = 120_000_000) {
         self.suggestionOperations = suggestionOperations ?? .live()
         self.suggestionOperationsInjected = suggestionOperations != nil
         self.suggestionDelayNanoseconds = suggestionDelayNanoseconds
@@ -261,6 +272,7 @@ final class AppModel: ObservableObject {
             try validateCurrentWindow(captured)
             snapshot = captured
             persist()
+            if let latest = captured.items.first(where: { $0.fingerprint == item.fingerprint }) { scheduleSuggestionPrecompute(for: latest) }
             if snapshot.preferences.soundEnabled { NSSound(named: "Pop")?.play() }
         } catch { statusMessage = error.localizedDescription }
     }

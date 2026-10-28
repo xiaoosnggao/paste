@@ -222,7 +222,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private func panelDestination(on screen: NSRect) -> NSRect {
         let detailHeight = PanelDetailLayout.contentHeight(forScreenHeight: screen.height)
         if model.panelDetailContentHeight != detailHeight { model.panelDetailContentHeight = detailHeight }
-        return PanelPresentation.visibleFrame(on: screen, suggestionsVisible: model.contextSuggestionsPresented,
+        return PanelPresentation.visibleFrame(on: screen, suggestionsVisible: model.suggestionStripAvailable,
                                               additionalHeight: model.suggestionAdditionalHeight,
                                               detailContentHeight: model.panelDetail == nil ? nil : detailHeight)
     }
@@ -569,8 +569,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
         if flags == .option, !textEditing,
            let number = PanelKeyboard.digit(for: event.keyCode),
-           (1...5).contains(number), model.contextSuggestions.indices.contains(number - 1) {
-            if !event.isARepeat { model.applyContextSuggestion(model.contextSuggestions[number - 1]) }
+           (1...5).contains(number), model.displayedSuggestions.indices.contains(number - 1) {
+            if !event.isARepeat { model.applyContextSuggestion(model.displayedSuggestions[number - 1]) }
             return true
         }
         if flags.contains(.command), let key = event.charactersIgnoringModifiers?.lowercased() {

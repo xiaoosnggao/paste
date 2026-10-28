@@ -72,8 +72,9 @@ enum KnowledgeInteractionPreview {
         panel.isReleasedWhenClosed = false
         panel.contentView = PanelGlassContainer.make(content: PastePanelView(model: value), frame: NSRect(origin: .zero, size: frame.size))
         let frameAnimator = PanelFrameAnimator()
-        value.onSuggestionPanelChange = { [weak panel, weak value] expanded in
+        value.onSuggestionPanelChange = { [weak panel, weak value] _ in
             guard let panel, let value else { return }
+            let expanded = value.suggestionStripAvailable
             frameAnimator.animate(panel, to: PanelPresentation.visibleFrame(on: previewScreen, suggestionsVisible: expanded, additionalHeight: value.suggestionAdditionalHeight),
                                   reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
         }

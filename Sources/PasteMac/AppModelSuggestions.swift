@@ -12,14 +12,18 @@ struct ContextSuggestionOperations: Sendable {
     var summarize: @Sendable (MultiCardContextInput, AIServiceConfig) async throws -> MultiCardContextSummary
     var transformMultiple: @Sendable (MultiCardContextInput, ContextSuggestion, AIServiceConfig) async throws -> String
     var summarizeReporting: @Sendable (MultiCardContextInput, AIServiceConfig, ContextSuggestionProgressReporter) async throws -> MultiCardContextSummary
+    /// Like `suggest`, but reports suggestions as they stream in. Defaults to a non-streaming wrapper.
+    var suggestStreaming: @Sendable (ContextSuggestionInput, AIServiceConfig, @escaping @Sendable ([ContextSuggestion]) async -> Void) async throws -> [ContextSuggestion]
 
     init(suggest: @escaping @Sendable (ContextSuggestionInput, AIServiceConfig) async throws -> [ContextSuggestion],
          transform: @escaping @Sendable (ContextSuggestionInput, ContextSuggestion, AIServiceConfig) async throws -> String,
          summarize: @escaping @Sendable (MultiCardContextInput, AIServiceConfig) async throws -> MultiCardContextSummary = { try await ContextSuggestionsService().summarize(input: $0, service: $1) },
          transformMultiple: @escaping @Sendable (MultiCardContextInput, ContextSuggestion, AIServiceConfig) async throws -> String = { try await ContextSuggestionsService().transform(input: $0, suggestion: $1, service: $2) },
-         summarizeReporting: (@Sendable (MultiCardContextInput, AIServiceConfig, ContextSuggestionProgressReporter) async throws -> MultiCardContextSummary)? = nil) {
+         summarizeReporting: (@Sendable (MultiCardContextInput, AIServiceConfig, ContextSuggestionProgressReporter) async throws -> MultiCardContextSummary)? = nil,
+         suggestStreaming: (@Sendable (ContextSuggestionInput, AIServiceConfig, @escaping @Sendable ([ContextSuggestion]) async -> Void) async throws -> [ContextSuggestion])? = nil) {
         self.suggest = suggest; self.transform = transform; self.summarize = summarize; self.transformMultiple = transformMultiple
         self.summarizeReporting = summarizeReporting ?? { input, service, _ in try await summarize(input, service) }
+        self.suggestStreaming = suggestStreaming ?? { input, service, _ in try await suggest(input, service) }
     }
 
     static func live(service: ContextSuggestionsService = ContextSuggestionsService()) -> Self {
@@ -29,6 +33,9 @@ struct ContextSuggestionOperations: Sendable {
               transformMultiple: { try await service.transform(input: $0, suggestion: $1, service: $2) },
               summarizeReporting: { input, configuration, reporter in
                   try await service.summarize(input: input, service: configuration, progress: reporter.report)
+              },
+              suggestStreaming: { input, configuration, partial in
+                  try await service.suggest(input: input, service: configuration, onPartial: partial)
               })
     }
 }
@@ -47,6 +54,21 @@ struct ContextSuggestionRequestKey: Equatable, Sendable {
 extension AppModel {
     var contextSuggestionsPresented: Bool { contextSuggestionsVisible || contextSuggestionsLoading }
 
+    /// The strip under the toolbar has a fixed height and is shown whenever suggestions can run,
+    /// regardless of loading state, so the panel never resizes while results arrive.
+    var suggestionStripAvailable: Bool {
+        toolConfiguration.contextSuggestionsEnabled && (!isDemo || suggestionOperationsInjected) && contextSuggestionService != nil
+    }
+
+    /// What the strip and the 建议 page show: AI results, then streamed partials, then local rules.
+    var displayedSuggestions: [ContextSuggestion] {
+        if !contextSuggestions.isEmpty { return contextSuggestions }
+        if !partialContextSuggestions.isEmpty { return partialContextSuggestions }
+        return ruleSuggestions
+    }
+
+    nonisolated static let suggestionModelTimeoutNanoseconds: UInt64 = 15_000_000_000
+
     var contextSuggestionService: AIServiceConfig? {
         let available = toolConfiguration.aiServices.filter {
             $0.isEnabled && !$0.translationModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -64,7 +86,7 @@ extension AppModel {
 
     func currentContextSuggestionKey() -> ContextSuggestionRequestKey? {
         // The detail layer and the suggestions bar share the space above the panel's bottom edge.
-        guard suggestionSessionActive, panelDetail == nil, toolConfiguration.contextSuggestionsEnabled,
+        guard suggestionSessionActive, panelDetail == nil || panelDetail?.page == .suggestions, toolConfiguration.contextSuggestionsEnabled,
               (!isDemo || suggestionOperationsInjected), !isPasting, !toolBusy,
               !selectedIDs.isEmpty, let item = selectedItems.first,
               (selectedItems.count > 1 || (!item.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && item.kind != .image && item.kind != .file)),
@@ -112,7 +134,19 @@ extension AppModel {
             setContextSuggestionsVisible(true)
             return
         }
+        if key.cards.isEmpty {
+            if let stored = suggestionDiskCache.lookup(text: key.input.text, targetBundleID: key.input.targetBundleID, service: key.service) {
+                contextSuggestions = stored
+                contextSuggestionCache.append((key, stored))
+                if contextSuggestionCache.count > 24 { contextSuggestionCache.removeFirst() }
+                setContextSuggestionsVisible(true)
+                return
+            }
+            ruleSuggestions = RuleSuggestions.make(text: key.input.text, kind: key.input.kind)
+        }
         contextSuggestionsLoading = true
+        let diskKey = SuggestionDiskCache.key(text: key.input.text, targetBundleID: "", service: key.service)
+        let precomputed = key.cards.isEmpty && suggestionPrecomputeInFlight?.key == diskKey ? suggestionPrecomputeInFlight?.task : nil
         let generation = contextSuggestionGeneration
         let operations = suggestionOperations, delay = key.cards.isEmpty ? suggestionDelayNanoseconds : max(suggestionDelayNanoseconds, 500_000_000)
         contextSuggestionTask = Task { @MainActor [weak self] in
@@ -122,7 +156,15 @@ extension AppModel {
                 let summary: MultiCardContextSummary?
                 let suggestions: [ContextSuggestion]
                 if key.cards.isEmpty {
-                    summary = nil; suggestions = try await operations.suggest(key.input, key.service)
+                    summary = nil
+                    if let precomputed, let ready = await precomputed.value, !ready.isEmpty { suggestions = ready }
+                    else {
+                        suggestions = try await Self.withSuggestionTimeout {
+                            try await operations.suggestStreaming(key.input, key.service) { [weak self] partial in
+                                await self?.receivePartialSuggestions(partial, key: key, generation: generation)
+                            }
+                        }
+                    }
                 } else {
                     self?.contextSuggestionProgress = "正在整理 \(key.cards.count) 项内容…"
                     let reporter = ContextSuggestionProgressReporter { [weak self] done, total in
@@ -140,6 +182,10 @@ extension AppModel {
                     if self.multiCardSummaryCache.count > 12 { self.multiCardSummaryCache.removeFirst() }
                 }
                 self.contextSuggestions = Array(suggestions.prefix(5))
+                self.partialContextSuggestions = []
+                if summary == nil, !suggestions.isEmpty {
+                    self.suggestionDiskCache.store(self.contextSuggestions, text: key.input.text, targetBundleID: key.input.targetBundleID, service: key.service)
+                }
                 self.setContextSuggestionsVisible(true)
                 self.contextSuggestionsLoading = false
                 self.contextSuggestionTask = nil
@@ -152,7 +198,11 @@ extension AppModel {
             } catch {
                 guard let self, self.contextSuggestionIsCurrent(key, generation: generation) else { return }
                 self.contextSuggestionProgress = nil
-                self.contextSuggestionsError = error is CancellationError ? nil : error.localizedDescription
+                self.partialContextSuggestions = []
+                if error is CancellationError { self.contextSuggestionsError = nil }
+                else if !self.ruleSuggestions.isEmpty {
+                    self.contextSuggestionsError = (error as? CloudToolsError) == .timedOut ? "AI 建议超时，已显示本地建议。" : "AI 建议暂不可用，已显示本地建议。"
+                } else { self.contextSuggestionsError = error.localizedDescription }
                 if !(error is CancellationError) { self.setContextSuggestionsVisible(true) }
                 self.contextSuggestionsLoading = false
                 self.contextSuggestionTask = nil
@@ -170,6 +220,7 @@ extension AppModel {
         if let key = contextSuggestionKey ?? currentContextSuggestionKey() ?? dismissedContextSuggestionKey {
             contextSuggestionCache.removeAll { $0.0 == key }
             multiCardSummaryCache.removeAll { $0.0 == key }
+            if key.cards.isEmpty { suggestionDiskCache.remove(text: key.input.text, targetBundleID: key.input.targetBundleID, service: key.service) }
         }
         dismissedContextSuggestionKey = nil
         clearContextSuggestions(keepVisible: true)
@@ -182,10 +233,13 @@ extension AppModel {
     }
 
     func applyContextSuggestion(_ suggestion: ContextSuggestion) {
-        guard contextSuggestionApplyingID == nil, !contextSuggestionsLoading,
+        // Rule and streamed suggestions are usable at once; picking one stops the pending request.
+        guard contextSuggestionApplyingID == nil,
               let key = contextSuggestionKey, currentContextSuggestionKey() == key,
-              contextSuggestions.contains(where: { $0 == suggestion }) else { return }
+              displayedSuggestions.contains(where: { $0 == suggestion }),
+              !contextSuggestionsLoading || suggestion.origin == .rule || partialContextSuggestions.contains(suggestion) else { return }
         contextSuggestionTask?.cancel()
+        contextSuggestionsLoading = false
         contextSuggestionGeneration = UUID()
         let generation = contextSuggestionGeneration, operations = suggestionOperations
         contextSuggestionApplyingID = suggestion.id
@@ -242,6 +296,56 @@ extension AppModel {
         }
     }
 
+    private func receivePartialSuggestions(_ partial: [ContextSuggestion], key: ContextSuggestionRequestKey, generation: UUID) {
+        guard contextSuggestionIsCurrent(key, generation: generation), contextSuggestionsLoading else { return }
+        // Keep identities stable for rows that already streamed in, so selection does not jump.
+        let kept = partial.map { row in partialContextSuggestions.first { $0.title == row.title } ?? row }
+        partialContextSuggestions = Array(kept.prefix(5))
+    }
+
+    /// Races a suggestion request against the 15 s budget; slow providers leave the rule suggestions in place.
+    nonisolated static func withSuggestionTimeout<T: Sendable>(_ operation: @escaping @Sendable () async throws -> T) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask { try await operation() }
+            group.addTask {
+                try await Task.sleep(nanoseconds: AppModel.suggestionModelTimeoutNanoseconds)
+                throw CloudToolsError.timedOut
+            }
+            defer { group.cancelAll() }
+            guard let first = try await group.next() else { throw CancellationError() }
+            return first
+        }
+    }
+
+    /// Prepares suggestions for a fresh copy while the panel is closed, so it opens with them ready.
+    func scheduleSuggestionPrecompute(for item: ClipItem) {
+        suggestionPrecomputeTask?.cancel()
+        suggestionPrecomputeTask = nil
+        guard toolConfiguration.backgroundSuggestionPrecompute, toolConfiguration.contextSuggestionsEnabled,
+              !isDemo || suggestionOperationsInjected, SuggestionPrecompute.eligible(item),
+              let service = contextSuggestionService else { return }
+        let target = pasteEngine.target
+        let input = ContextSuggestionInput(text: item.text, kind: item.kind.rawValue, sourceName: item.sourceName,
+                                           sourceBundleID: item.sourceBundleID, targetName: target?.name ?? "", targetBundleID: target?.bundleID ?? "")
+        guard suggestionDiskCache.lookup(text: input.text, targetBundleID: input.targetBundleID, service: service) == nil else { return }
+        let operations = suggestionOperations, delay = suggestionPrecomputeDelayNanoseconds
+        let diskKey = SuggestionDiskCache.key(text: input.text, targetBundleID: "", service: service)
+        suggestionPrecomputeTask = Task(priority: .utility) { @MainActor [weak self] in
+            do { try await Task.sleep(nanoseconds: delay) } catch { return }
+            guard let self, !Task.isCancelled, self.toolConfiguration.backgroundSuggestionPrecompute else { return }
+            let work = Task<[ContextSuggestion]?, Never>(priority: .utility) {
+                try? await Self.withSuggestionTimeout { try await operations.suggest(input, service) }
+            }
+            self.suggestionPrecomputeInFlight = (diskKey, work)
+            let result = await withTaskCancellationHandler { await work.value } onCancel: { work.cancel() }
+            if self.suggestionPrecomputeInFlight?.key == diskKey { self.suggestionPrecomputeInFlight = nil }
+            guard let result, !result.isEmpty else { return }
+            // Stored under the copy-time target and as a target-independent fallback.
+            self.suggestionDiskCache.store(result, text: input.text, targetBundleID: input.targetBundleID, service: service)
+            if !input.targetBundleID.isEmpty { self.suggestionDiskCache.store(result, text: input.text, targetBundleID: "", service: service) }
+        }
+    }
+
     private func updateContextSuggestionProgress(done: Int, total: Int, key: ContextSuggestionRequestKey, generation: UUID) {
         guard contextSuggestionIsCurrent(key, generation: generation) else { return }
         contextSuggestionProgress = done == total ? "正在合并摘要…" : "已处理 \(done) / \(total) 段"
@@ -265,6 +369,7 @@ extension AppModel {
         contextSuggestionTask = nil
         contextSuggestionKey = nil
         contextSuggestions = []
+        ruleSuggestions = []; partialContextSuggestions = []
         contextSuggestionsLoading = false
         contextSuggestionApplyingID = nil
         contextSuggestionsError = nil

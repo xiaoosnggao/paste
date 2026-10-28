@@ -26,14 +26,13 @@ struct PastePanelView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             .clipped()
             toolbar
+            // Fixed height: shown whenever suggestions can run, so results never resize the panel.
+            if model.suggestionStripAvailable && model.panelDetail == nil {
+                SuggestionStripView(model: model)
+                    .padding(.top, PanelPresentation.suggestionSpacing)
+            }
             Color.clear.frame(height: PanelMetrics.toolbarDeckSpacing)
             deck.frame(height: PanelMetrics.deckHeight)
-            if model.contextSuggestionsPresented && model.panelDetail == nil {
-                ContextSuggestionsView(model: model)
-                    .frame(height: PanelPresentation.suggestionContentHeight + model.suggestionAdditionalHeight)
-                    .padding(.top, PanelPresentation.suggestionSpacing)
-                    .transition(.opacity)
-            }
         }
         .padding(.top, PanelMetrics.panelTopPadding).padding(.bottom, PanelMetrics.panelBottomPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)

@@ -292,12 +292,22 @@ enum ContextSuggestionModelChecks {
         try check(!presentationChanges.contains(false),
                   "loading-to-results transition briefly collapsed the suggestions region")
         presentationChanges.removeAll()
+        let screen = NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let loadingFrame = PanelPresentation.visibleFrame(on: screen, suggestionsVisible: expansion.suggestionStripAvailable,
+                                                           additionalHeight: expansion.suggestionAdditionalHeight)
         expansion.select(other)
+        try check(!expansion.ruleSuggestions.isEmpty && expansion.displayedSuggestions.first?.origin == .rule,
+                  "local rule suggestions were not shown instantly while AI loads")
+        try check(expansion.suggestionStripAvailable && expansion.suggestionAdditionalHeight == 0,
+                  "suggestion strip was unavailable or grew")
         try check(expansion.contextSuggestionsLoading && expansion.contextSuggestionsPresented,
                   "selecting another card collapsed the existing region instead of showing loading")
         try await eventually { !expansion.contextSuggestionsLoading && expansion.contextSuggestions.first?.title == other.text }
         try check(!presentationChanges.contains(false),
                   "card-switch loading transition briefly collapsed the suggestions region")
+        try check(PanelPresentation.visibleFrame(on: screen, suggestionsVisible: expansion.suggestionStripAvailable,
+                                                 additionalHeight: expansion.suggestionAdditionalHeight) == loadingFrame,
+                  "suggestion strip height changed between loading and results")
         expansion.dismissContextSuggestions()
         try check(!expansion.contextSuggestionsPresented && presentationChanges.last == false,
                   "dismissing suggestions failed to remove the presented region")
@@ -374,6 +384,53 @@ enum ContextSuggestionModelChecks {
         await staleCalls.release()
         try await settle()
         try check(stale.snapshot.items.count == 2, "late transformation for previous selection created a result")
+        // ⌘J: the 建议 page keeps the suggestion session alive instead of clearing it.
+        let pageCalls = ContextSuggestionRecorder()
+        let paged = make(pageCalls)
+        try await eventually { paged.contextSuggestionsVisible }
+        paged.select(source)
+        paged.selectedIDs = [source.id, other.id]
+        try await settle()
+        try check(paged.suggestionAdditionalHeight == 0, "multi-select summary resized the panel")
+        paged.select(source)
+        try await settle()
+        paged.openPanelDetailForSelection(.suggestions)
+        try check(paged.panelDetail?.page == .suggestions, "⌘J did not open the 建议 page")
+        try check(paged.contextSuggestionKey != nil, "the 建议 page cleared the suggestions it shows")
+        paged.closePanelDetail()
+
+        // Background precompute follows the settings toggle.
+        let preCalls = ContextSuggestionRecorder()
+        let pre = make(preCalls)
+        pre.suggestionPrecomputeDelayNanoseconds = 0
+        var preConfig = pre.toolConfiguration
+        preConfig.backgroundSuggestionPrecompute = false
+        pre.toolConfiguration = preConfig
+        try await settle()
+        let copied = ClipItem(text: "Precompute candidate text", kind: .text, sourceBundleID: "test.source", sourceName: "Fixture")
+        pre.scheduleSuggestionPrecompute(for: copied)
+        try check(pre.suggestionPrecomputeTask == nil, "precompute ran with the toggle off")
+        preConfig.backgroundSuggestionPrecompute = true
+        pre.toolConfiguration = preConfig
+        pre.scheduleSuggestionPrecompute(for: copied)
+        try check(pre.suggestionPrecomputeTask != nil, "precompute did not start with the toggle on")
+        pre.suggestionPrecomputeTask?.cancel()
+        try check(!SuggestionPrecompute.eligible(ClipItem(text: "password: hunter2", kind: .text)),
+                  "sensitive-looking text was eligible for precompute")
+
+        // The disk cache keys on content, target and service, and survives a reload.
+        let cacheDir = root.appendingPathComponent("suggestion-cache", isDirectory: true)
+        try FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+        let ai = ContextSuggestion(id: "c1", title: "翻译", instruction: "Translate to Chinese.", detail: "翻译成中文", origin: .ai)
+        let disk = SuggestionDiskCache(directory: cacheDir)
+        disk.store([ai], text: "hello", targetBundleID: "com.a", service: service)
+        try check(SuggestionDiskCache.key(text: "hello", targetBundleID: "com.a", service: service)
+                  != SuggestionDiskCache.key(text: "hello", targetBundleID: "com.b", service: service)
+                  && SuggestionDiskCache.key(text: "hello", targetBundleID: "com.a", service: service)
+                  != SuggestionDiskCache.key(text: "hello!", targetBundleID: "com.a", service: service), "cache key ignored content or target")
+        try check(SuggestionDiskCache(directory: cacheDir).lookup(text: "hello", targetBundleID: "com.a", service: service)?.first?.title == "翻译",
+                  "disk cache did not persist")
+        try check(disk.lookup(text: "other", targetBundleID: "com.a", service: service) == nil, "cache hit for different content")
         return count
     }
 

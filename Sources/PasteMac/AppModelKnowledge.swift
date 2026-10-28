@@ -2,10 +2,8 @@ import Foundation
 import PasteCore
 
 extension AppModel {
-    var suggestionAdditionalHeight: CGFloat {
-        guard selectedIDs.count > 1 else { return 0 }
-        return 102 + (multiCardSummaryExpanded ? min(160, CGFloat(multiCardSummary?.facts.count ?? 0) * 22 + 28) : 0)
-    }
+    /// The strip never grows; the multi-select summary moved to the 建议 page.
+    var suggestionAdditionalHeight: CGFloat { 0 }
     func startLocalKnowledge() {
         guard !isDemo else { return }
         automaticClassificationEnabled = toolDefaults.object(forKey: "local.autoClassification") as? Bool ?? true
