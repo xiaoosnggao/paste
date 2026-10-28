@@ -107,7 +107,7 @@ private struct RegenerateButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: "arrow.clockwise")
-                .font(.system(size: 11, weight: .semibold))
+                .font(.scaled(.caption, weight: .semibold))
                 .foregroundStyle(hovering && !loading ? PanelPalette.text : PanelPalette.secondaryText)
                 .rotationEffect(.degrees(loading && !reduceMotion ? 360 : 0))
                 .animation(loading && !reduceMotion ? .linear(duration: 0.9).repeatForever(autoreverses: false) : .default, value: loading)
