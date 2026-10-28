@@ -86,7 +86,7 @@ struct PreviewView: View {
     /// Everything beyond paste and copy: the panel pages, recognition and image or file tools.
     private func moreMenu(_ value: ClipItem) -> some View {
         Menu {
-            Section("在面板中打开") {
+            Section("打开") {
                 ForEach(PanelDetailPage.layerPages.filter { $0.isAvailable(for: value) }) { page in
                     Button("\(page.title) (\(page.shortcutLabel))", systemImage: page.systemImage) { model.openFromPreview(page, item: value) }
                 }

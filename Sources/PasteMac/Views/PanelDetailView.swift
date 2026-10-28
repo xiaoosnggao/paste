@@ -5,6 +5,15 @@ import PasteCore
 /// The detail layer above the deck. It replaces the editor, smart and tool
 /// windows when they start from the panel, so the panel stays the one place
 /// a card is worked on. Tools started by a global shortcut still use their window.
+/// The detail window's root: follows the model so page switches reuse the window.
+struct PanelDetailWindowView: View {
+    @ObservedObject var model: AppModel
+    var body: some View {
+        if let detail = model.panelDetail { PanelDetailView(model: model, detail: detail) }
+        else { Color.clear }
+    }
+}
+
 struct PanelDetailView: View {
     @ObservedObject var model: AppModel
     let detail: PanelDetailState
@@ -21,11 +30,8 @@ struct PanelDetailView: View {
             }
         }
         .id(detail)
-        .frame(maxWidth: PanelDetailLayout.maxContentWidth)
-        .frame(height: model.panelDetailContentHeight)
-        .background(PanelPalette.canvas.opacity(reduceTransparency ? 1 : 0.86), in: RoundedRectangle(cornerRadius: DesignTokens.Radius.xl))
-        .overlay { RoundedRectangle(cornerRadius: DesignTokens.Radius.xl).strokeBorder(PanelPalette.border.opacity(0.45), lineWidth: 0.75) }
-        .shadow(color: .black.opacity(0.18), radius: 8, y: 3)
+        // A standalone window above the panel; the window's glass is the only background.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("卡片详情")
     }
@@ -79,12 +85,6 @@ struct PanelDetailScaffold<Content: View, Footer: View>: View {
 
     private var header: some View {
         HStack(spacing: DesignTokens.Space.sm) {
-            Button { model.closePanelDetail() } label: {
-                Image(systemName: "xmark").font(.scaled(.label, weight: .semibold))
-                    .frame(width: 24, height: 24).contentShape(Rectangle())
-            }
-            .buttonStyle(.plain).foregroundStyle(PanelPalette.secondaryText)
-            .help("关闭详情 (Esc)").accessibilityLabel("关闭详情")
             if let item { SourceIcon(item: item).frame(width: 20, height: 20).accessibilityHidden(true) }
             // With a card, the page bar names the page; the header names the card once.
             let heading = item.map(Self.cardTitle) ?? title
@@ -97,7 +97,9 @@ struct PanelDetailScaffold<Content: View, Footer: View>: View {
             Spacer(minLength: DesignTokens.Space.md)
             if let item { PanelDetailPageBar(model: model, item: item, current: page).fixedSize() }
         }
-        .padding(.horizontal, DesignTokens.Space.md)
+        // The window's own close button sits at the leading edge; Esc closes too.
+        .padding(.leading, WindowMetrics.trafficLightInset)
+        .padding(.trailing, DesignTokens.Space.md)
         .frame(height: PanelDetailLayout.headerHeight)
     }
 

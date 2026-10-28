@@ -13,7 +13,7 @@ final class AppModel: ObservableObject {
     @Published var selectedIDs: Set<UUID> = [] { didSet { scheduleContextSuggestions(); syncPreviewToSelection() } }
     @Published var filter = ClipFilter() { didSet { cachedVisibleItems = nil; scheduleHistoryQuery(); scheduleContextSuggestions() } }
     @Published var isSearchVisible = false
-    /// The detail layer above the deck, or nil when only the deck shows.
+    /// The page shown in the detail window above the panel, or nil when it is closed.
     @Published var panelDetail: PanelDetailState? { didSet { if panelDetail != oldValue { panelDetailChanged(from: oldValue) } } }
     /// The detail card height for the panel's current screen.
     /// The card the preview window shows; nil while it is closed.

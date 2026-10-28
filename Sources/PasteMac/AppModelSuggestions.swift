@@ -93,7 +93,7 @@ extension AppModel {
     func currentContextSuggestionKey() -> ContextSuggestionRequestKey? {
         // Suggestions live in the preview window: nothing is requested for a mere panel selection.
         // A multi-selection that includes the previewed card gets the summary; otherwise the previewed card.
-        guard suggestionSessionActive, panelDetail == nil, let previewID = previewItemID, toolConfiguration.contextSuggestionsEnabled,
+        guard suggestionSessionActive, let previewID = previewItemID, toolConfiguration.contextSuggestionsEnabled,
               (!isDemo || suggestionOperationsInjected), !isPasting, !toolBusy else { return nil }
         let multi = selectedIDs.count > 1 && selectedIDs.contains(previewID)
         let selectedItems = multi ? self.selectedItems : (snapshot.items.first { $0.id == previewID }).map { [$0] } ?? []

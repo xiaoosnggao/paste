@@ -56,6 +56,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private var toolKeyMonitor: Any?
     private var previewWindow: NSWindow?
     private var previewKeyMonitor: Any?
+    private var detailWindow: NSWindow?
+    private var detailKeyMonitor: Any?
     private var toolClickMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -218,17 +220,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let destination = panelDestination(on: screen.frame)
         panelFrameAnimator.animate(panel, to: destination, reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
     }
-    /// One height for the panel: base deck plus either the detail layer or the suggestions bar.
+    /// One height for the panel: base deck plus the suggestions bar. Detail pages are windows.
     private func panelDestination(on screen: NSRect) -> NSRect {
         let detailHeight = PanelDetailLayout.contentHeight(forScreenHeight: screen.height)
         if model.panelDetailContentHeight != detailHeight { model.panelDetailContentHeight = detailHeight }
         return PanelPresentation.visibleFrame(on: screen, suggestionsVisible: false,
                                               additionalHeight: model.suggestionAdditionalHeight,
-                                              detailContentHeight: model.panelDetail == nil ? nil : detailHeight)
+                                              detailContentHeight: nil)
     }
+    /// 编辑, 翻译 and 智能 open one window above the panel, like the preview.
+    /// Switching pages reuses it; closing it ends the page.
     private func panelDetailChanged() {
-        if panelPresented { resizePanelForSuggestions() }
-        else if model.panelDetail != nil { showPanel() }
+        guard let detail = model.panelDetail else {
+            if let detailWindow { self.detailWindow = nil; detailWindow.close() }
+            return
+        }
+        let title = detail.page.title
+        if let detailWindow, detailWindow.isVisible {
+            detailWindow.title = title
+        } else {
+            detailWindow = window(title: title, size: .init(width: 760, height: 480), view: PanelDetailWindowView(model: model))
+            detailWindow?.minSize = NSSize(width: 520, height: 320)
+        }
+        NSApp.activate()
+        detailWindow?.makeKeyAndOrderFront(nil)
     }
     private func cancelSuggestionResize() {
         pendingSuggestionResize?.cancel(); pendingSuggestionResize = nil
@@ -532,6 +547,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             default: return event
             }
         }
+        // Detail window: ⌘S saves the editor, Return translates, ⌘R retries, Esc closes.
+        // A composing input method keeps every key.
+        detailKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, let window = self.detailWindow, event.window === window, let page = self.model.panelDetail?.page else { return event }
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            let editor = window.firstResponder as? NSTextView
+            let textEditing = editor != nil
+            if editor?.hasMarkedText() == true { return event }
+            if let action = PanelDetailKey.resolve(page: page, keyCode: event.keyCode, flags: flags,
+                                                   key: event.charactersIgnoringModifiers?.lowercased(),
+                                                   textEditing: textEditing, composing: false,
+                                                   fieldEditor: editor?.isFieldEditor == true) {
+                guard !event.isARepeat else { return nil }
+                switch action {
+                case .save: self.model.savePanelEditor()
+                case .translate: self.model.translateToolInput()
+                case .retry: self.model.retryToolOperation()
+                case .ignore: break
+                }
+                return nil
+            }
+            if event.keyCode == 53, flags.isEmpty {
+                if !event.isARepeat { window.close() }
+                return nil
+            }
+            if flags == .command, let key = event.charactersIgnoringModifiers?.lowercased(),
+               let next = PanelDetailPage.forCommandKey(key), let item = self.model.panelDetailItem {
+                self.model.showDetailPage(next, for: item); return nil
+            }
+            return event
+        }
         toolKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, event.window == self.toolWindow else { return event }
             if let editor = self.toolWindow?.firstResponder as? NSTextView, editor.hasMarkedText() { return event }
@@ -549,24 +595,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let textEditing = panel.firstResponder is NSTextView
         if event.isARepeat && !textEditing && ([36, 76, 49].contains(event.keyCode) || flags.contains(.command)) { return true }
-        if let page = model.panelDetail?.page,
-           let action = PanelDetailKey.resolve(page: page, keyCode: event.keyCode, flags: flags,
-                                               key: event.charactersIgnoringModifiers?.lowercased(),
-                                               textEditing: textEditing,
-                                               composing: (panel.firstResponder as? NSTextView)?.hasMarkedText() == true,
-                                               fieldEditor: (panel.firstResponder as? NSTextView)?.isFieldEditor == true) {
-            guard !event.isARepeat else { return true }
-            switch action {
-            case .save: model.savePanelEditor()
-            case .translate: model.translateToolInput()
-            case .retry: model.retryToolOperation()
-            case .ignore: break
-            }
-            return true
-        }
         if event.keyCode == 53 {
             let editor = panel.firstResponder as? NSTextView
-            switch PanelEscapeAction.resolve(detailOpen: model.panelDetail != nil, textEditing: textEditing,
+            switch PanelEscapeAction.resolve(detailOpen: false, textEditing: textEditing,
                                              fieldEditor: editor?.isFieldEditor == true, composing: editor?.hasMarkedText() == true) {
             case .passToText: return false
             case .endTextEditing: panel.makeFirstResponder(nil); return true
@@ -676,6 +707,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     func windowWillClose(_ notification: Notification) {
         if notification.object as? NSWindow === suggestionResultWindow { model.releaseHistory(for: "suggestion") }
         if notification.object as? NSWindow === toolWindow { model.toolSessionActive = false; model.cancelToolOperation() }
+        if let closing = notification.object as? NSWindow, closing === detailWindow {
+            detailWindow = nil
+            // Closing keeps a dirty editor draft, so reopening the card resumes it.
+            model.closePanelDetail()
+            if panelPresented, panel?.isVisible == true { panel?.makeKey() }
+        }
         if notification.object as? NSWindow === previewWindow {
             model.previewWindowClosed()
             // Keys go back to the panel so ← → and Space keep working there.
