@@ -74,6 +74,15 @@ final class PanelAnimationContainer: NSView {
         addSubview(surface)
     }
     required init?(coder: NSCoder) { nil }
+
+    /// The panel grows for the detail layer; the surface must grow with it or the
+    /// area outside the old 320 pt frame has no material. Only the slide offset is kept.
+    override func resizeSubviews(withOldSize oldSize: NSSize) {
+        super.resizeSubviews(withOldSize: oldSize)
+        if surface.frame.size != bounds.size {
+            surface.frame = NSRect(origin: surface.frame.origin, size: bounds.size)
+        }
+    }
 }
 
 @MainActor
@@ -113,6 +122,13 @@ final class PanelGlassSurface: NSView {
     }
 
     required init?(coder: NSCoder) { nil }
+
+    override func resizeSubviews(withOldSize oldSize: NSSize) {
+        super.resizeSubviews(withOldSize: oldSize)
+        // Keep the material and the hosted content covering the whole surface.
+        if let background, background.frame != bounds { background.frame = bounds }
+        if content.superview === background, content.frame != bounds { content.frame = bounds }
+    }
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
