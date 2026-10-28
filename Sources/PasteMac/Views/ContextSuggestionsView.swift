@@ -11,13 +11,9 @@ struct PreviewSuggestionsSection: View {
             HStack(spacing: DesignTokens.Space.xs) {
                 Label("建议", systemImage: "sparkles").font(.scaled(.label, weight: .semibold)).foregroundStyle(PanelPalette.accent)
                 Spacer(minLength: 0)
-                if model.contextSuggestionsLoading { ProgressView().controlSize(.mini).help("AI 建议生成中") }
-                if model.contextSuggestionKey != nil {
-                    Button("重新生成", action: model.retryContextSuggestions).buttonStyle(.plain).font(.scaled(.caption))
-                        .foregroundStyle(PanelPalette.accent)
+                if model.contextSuggestionKey != nil || model.contextSuggestionsLoading {
+                    RegenerateButton(loading: model.contextSuggestionsLoading, action: model.retryContextSuggestions)
                         .disabled(model.contextSuggestionsLoading || model.contextSuggestionApplyingID != nil)
-                    Button(action: model.dismissContextSuggestions) { Image(systemName: "xmark") }
-                        .buttonStyle(.plain).foregroundStyle(PanelPalette.secondaryText).help("隐藏建议").accessibilityLabel("隐藏建议")
                 }
             }
             Text(subtitle).font(.scaled(.caption)).foregroundStyle(PanelPalette.secondaryText).lineLimit(1).truncationMode(.middle)
@@ -98,5 +94,30 @@ struct PreviewSuggestionsSection: View {
             value = value.replacingOccurrences(of: "[\(item.id.uuidString)]", with: (item.sourceName.isEmpty ? "来源" : item.sourceName) + "：")
         }
         return value
+    }
+}
+
+/// Subtle refresh icon for the 建议 header; spins while suggestions load.
+private struct RegenerateButton: View {
+    let loading: Bool
+    let action: () -> Void
+    @State private var hovering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "arrow.clockwise")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(hovering && !loading ? PanelPalette.text : PanelPalette.secondaryText)
+                .rotationEffect(.degrees(loading && !reduceMotion ? 360 : 0))
+                .animation(loading && !reduceMotion ? .linear(duration: 0.9).repeatForever(autoreverses: false) : .default, value: loading)
+                .frame(width: 22, height: 22)
+                .background(hovering && !loading ? PanelPalette.hover : .clear, in: Circle())
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(loading ? "AI 建议生成中" : "重新生成")
+        .accessibilityLabel("重新生成")
     }
 }
