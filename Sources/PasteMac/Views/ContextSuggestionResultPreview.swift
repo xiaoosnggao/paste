@@ -38,9 +38,9 @@ struct ContextSuggestionResultPreview: View {
                     }
                 }
             }.scrollIndicators(.never)
-            TextEditor(text: $editedText).font(.system(size: 14))
+            TextEditor(text: $editedText).font(.scaled(.body))
                 .scrollContentBackground(.hidden)
-                .padding(10).background(PanelPalette.surface, in: RoundedRectangle(cornerRadius: 8))
+                .padding(10).background(PanelPalette.surface, in: RoundedRectangle(cornerRadius: DesignTokens.Radius.md))
             HStack {
                 Text(notice ?? "").font(.caption).foregroundStyle(PanelPalette.secondaryText)
                 Spacer()
@@ -56,7 +56,7 @@ struct ContextSuggestionResultPreview: View {
                 }.disabled(saved)
                 Button("粘贴") {
                     if !model.saveContextSuggestionPreview(result, text: editedText, paste: true) { notice = "无法保存结果，请重试。" }
-                }.buttonStyle(.borderedProminent).foregroundStyle(PanelPalette.canvas)
+                }.buttonStyle(.borderedProminent).tint(PanelPalette.accent).foregroundStyle(PanelPalette.onAccent)
             }
         }
         .padding(24).frame(minWidth: 560, minHeight: 420)

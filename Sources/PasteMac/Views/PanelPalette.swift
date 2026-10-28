@@ -11,10 +11,14 @@ enum PanelPalette {
     static let selection = adaptive(light: 0xFFFFFF, dark: 0xDCE8FF)
     static let selectionText = adaptive(light: 0x111827, dark: 0x111827)
     static let selectionSecondaryText = adaptive(light: 0x46546B, dark: 0x34445F)
-    static let selectionBorder = Color.accentColor
+    /// Ring around the selected card or row. Non-text, so it needs 3:1 against `selection` and `surface`.
+    static let selectionBorder = adaptive(light: 0x0058D0, dark: 0x3B7BEA)
     static let text = adaptive(light: 0x111112, dark: 0xF2F2F5)
     static let secondaryText = adaptive(light: 0x59575D, dark: 0xBDC0C9)
-    static let accent = adaptive(light: 0x333136, dark: 0xE4E4E7)
+    /// Links, active filters and prominent buttons. Meets 4.5:1 on every panel background.
+    static let accent = adaptive(light: 0x0058D0, dark: 0x8AB4F8)
+    /// Text and symbols drawn on an `accent` fill.
+    static let onAccent = adaptive(light: 0xFFFFFF, dark: 0x202124)
     static let border = adaptive(light: 0xAAA7AF, dark: 0x686A73)
     static let skeleton = adaptive(light: 0xC9C7CC, dark: 0x45474F)
 
@@ -41,8 +45,8 @@ struct PanelControlStyle: ButtonStyle {
         var body: some View {
             configuration.label
                 .foregroundStyle(selected ? PanelPalette.selectionText : PanelPalette.text)
-                .background(selected ? PanelPalette.selection : (hovering || configuration.isPressed ? PanelPalette.hover : .clear), in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(selected ? PanelPalette.selectionBorder.opacity(0.7) : .clear, lineWidth: 1))
+                .background(selected ? PanelPalette.selection : (hovering || configuration.isPressed ? PanelPalette.hover : .clear), in: RoundedRectangle(cornerRadius: DesignTokens.Radius.md))
+                .overlay(RoundedRectangle(cornerRadius: DesignTokens.Radius.md).strokeBorder(selected ? PanelPalette.selectionBorder : .clear, lineWidth: 1))
                 .opacity(configuration.isPressed ? 0.72 : 1)
                 .contentShape(Rectangle())
                 .onHover { hovering = $0 }
