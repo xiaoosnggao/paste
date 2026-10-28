@@ -16,6 +16,15 @@ struct PasteboardMain {
             application.run()
             return
         }
+        if let index = CommandLine.arguments.firstIndex(of: "--render-snapshots"), CommandLine.arguments.count > index + 1 {
+            let directory = URL(fileURLWithPath: CommandLine.arguments[index + 1])
+            Task { @MainActor in
+                do { let count = try await SnapshotRenderer.run(into: directory); print("RENDERED: \(count) snapshots"); exit(0) }
+                catch { print("FAIL: \(error.localizedDescription)"); exit(1) }
+            }
+            application.run()
+            return
+        }
         if CommandLine.arguments.contains("--self-test") {
             setbuf(stdout, nil)
             Task { @MainActor in

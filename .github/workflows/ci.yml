@@ -40,3 +40,14 @@ jobs:
 
       - name: Run native integration checks
         run: dist/Pasteboard.app/Contents/MacOS/Pasteboard --self-test
+
+      - name: Render UI snapshots
+        run: dist/Pasteboard.app/Contents/MacOS/Pasteboard --render-snapshots "$RUNNER_TEMP/snapshots"
+
+      - name: Upload UI snapshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-snapshots
+          path: ${{ runner.temp }}/snapshots
+          if-no-files-found: warn

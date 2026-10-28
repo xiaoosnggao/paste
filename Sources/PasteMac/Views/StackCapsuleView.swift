@@ -21,7 +21,13 @@ struct StackCapsuleView: View {
 
     @ObservedObject var model: AppModel
     var onClose: () -> Void
-    @State private var expanded = false
+    @State private var expanded: Bool
+
+    init(model: AppModel, expanded: Bool = false, onClose: @escaping () -> Void) {
+        self.model = model
+        self.onClose = onClose
+        _expanded = State(initialValue: expanded)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
