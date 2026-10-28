@@ -52,6 +52,9 @@ struct WindowScaffold<Accessory: View, Content: View, Footer: View>: View {
         self.footer = footer()
     }
 
+    /// Measured from the window's close button; fallback until the window exists.
+    @State private var trafficLightCenterY = PopupMetrics.trafficLightCenterY
+
     var body: some View {
         VStack(spacing: 0) {
             titleBar
@@ -101,7 +104,7 @@ struct WindowScaffold<Accessory: View, Content: View, Footer: View>: View {
         .padding(.leading, chrome == .window ? WindowMetrics.trafficLightInset : WindowMetrics.contentPadding)
         .padding(.trailing, chrome == .window ? PopupMetrics.toolbarTrailingInset : WindowMetrics.contentPadding)
         // Windows: center the toolbar on the traffic lights, not on the 44 pt strip.
-        .frame(height: chrome == .window ? PopupMetrics.trafficLightCenterY * 2 : WindowMetrics.titleBarHeight)
+        .frame(height: chrome == .window ? trafficLightCenterY * 2 : WindowMetrics.titleBarHeight)
         .overlay {
             if chrome == .window, let caption, !caption.isEmpty {
                 Text(caption).font(.scaled(.caption, weight: .medium)).foregroundStyle(PanelPalette.secondaryText)
@@ -109,7 +112,8 @@ struct WindowScaffold<Accessory: View, Content: View, Footer: View>: View {
                     .padding(.horizontal, 140).allowsHitTesting(false)
             }
         }
-        .frame(height: WindowMetrics.titleBarHeight, alignment: .top)
+        .frame(height: chrome == .window ? max(WindowMetrics.titleBarHeight, trafficLightCenterY * 2) : WindowMetrics.titleBarHeight, alignment: .top)
+        .background { if chrome == .window { TrafficLightReader { trafficLightCenterY = $0 }.frame(width: 0, height: 0) } }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(title)
     }

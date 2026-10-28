@@ -156,6 +156,17 @@ enum SystemChecks {
             try check(tintAlpha >= (dark ? PanelGlassSurface.tintAlpha.dark : PanelGlassSurface.tintAlpha.light) - 0.001,
                       "panel background lets the windows behind it show through")
         }
+        // Traffic-light center line: window base coords (bottom-left origin) → distance from top.
+        try check(TrafficLightGeometry.centerFromTop(buttonRect: NSRect(x: 20, y: 452, width: 16, height: 16), contentHeight: 480) == 20,
+                  "traffic-light center conversion is wrong")
+        let lightsWindow = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 400),
+                                    styleMask: [.titled, .closable, .fullSizeContentView], backing: .buffered, defer: false)
+        lightsWindow.isReleasedWhenClosed = false
+        lightsWindow.titlebarAppearsTransparent = true
+        if let measured = TrafficLightGeometry.measure(lightsWindow) {
+            try check(measured > 4 && measured < 40, "measured traffic-light center \(measured) is implausible")
+        }
+        lightsWindow.close()
         let upper = NSRect(x: 0, y: 1080, width: 1920, height: 1080)
         let lower = NSRect(x: 0, y: 0, width: 1920, height: 1080)
         let upperWindow = PanelPresentation.visibleFrame(on: upper)
