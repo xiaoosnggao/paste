@@ -107,6 +107,16 @@ final class PanelGlassSurface: NSView {
     private let cornerRadius: CGFloat
     private let reduceTransparencyOverride: Bool?
     private var background: NSView?
+    /// Strong tint between the blur and the content so whatever sits behind
+    /// the window never shows through as noise; the blur only softens edges.
+    private let tint: NSView = {
+        let view = NSView()
+        view.wantsLayer = true
+        view.autoresizingMask = [.width, .height]
+        return view
+    }()
+    /// Opacity of the tint over the translucent material, per appearance.
+    static let tintAlpha: (dark: CGFloat, light: CGFloat) = (0.90, 0.86)
 
     init(content: NSView, frame: NSRect, cornerRadius: CGFloat, reduceTransparency: Bool?) {
         self.content = content
@@ -127,13 +137,17 @@ final class PanelGlassSurface: NSView {
         super.resizeSubviews(withOldSize: oldSize)
         // Keep the material and the hosted content covering the whole surface.
         if let background, background.frame != bounds { background.frame = bounds }
-        if content.superview === background, content.frame != bounds { content.frame = bounds }
+        if tint.frame != bounds { tint.frame = bounds }
+        if content.frame != bounds { content.frame = bounds }
     }
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         updateMaterialColors()
     }
+
+    /// Exposed for self-checks: the tint drawn over the translucent material.
+    var tintLayerColor: NSColor? { tint.layer?.backgroundColor.flatMap { NSColor(cgColor: $0)?.usingColorSpace(.sRGB) } }
 
     private var usesDarkAppearance: Bool {
         effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
@@ -146,7 +160,14 @@ final class PanelGlassSurface: NSView {
                 ? NSColor(srgbRed: 32.0 / 255, green: 33.0 / 255, blue: 36.0 / 255, alpha: 1)
                 : NSColor(srgbRed: 236.0 / 255, green: 234.0 / 255, blue: 237.0 / 255, alpha: 1)
             background.layer?.backgroundColor = color.cgColor
-        } else if #available(macOS 26.0, *), let glass = background as? NSGlassEffectView {
+            tint.layer?.backgroundColor = NSColor.clear.cgColor
+            return
+        }
+        let base = usesDarkAppearance
+            ? NSColor(srgbRed: 32.0 / 255, green: 33.0 / 255, blue: 36.0 / 255, alpha: Self.tintAlpha.dark)
+            : NSColor(srgbRed: 236.0 / 255, green: 234.0 / 255, blue: 237.0 / 255, alpha: Self.tintAlpha.light)
+        tint.layer?.backgroundColor = base.cgColor
+        if #available(macOS 26.0, *), let glass = background as? NSGlassEffectView {
             // Native glass brightens this calibrated light tint toward Raycast's neutral gray.
             glass.tintColor = usesDarkAppearance
                 ? NSColor(srgbRed: 0.10, green: 0.105, blue: 0.12, alpha: 0.80)
@@ -158,6 +179,7 @@ final class PanelGlassSurface: NSView {
         let reduceTransparency = reduceTransparencyOverride ?? NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
         guard background == nil || (material == .solid) != reduceTransparency else { return }
         content.removeFromSuperview()
+        tint.removeFromSuperview()
         background?.removeFromSuperview()
         let surface: NSView
         if reduceTransparency {
@@ -187,18 +209,26 @@ final class PanelGlassSurface: NSView {
             if #available(macOS 27.0, *) { glass.effectIsInteractive = false }
             #endif
             // AppKit only guarantees correct glass ordering for contentView.
-            glass.contentView = content
+            tint.frame = bounds
+            content.frame = bounds
+            content.autoresizingMask = [.width, .height]
+            tint.addSubview(content)
+            glass.contentView = tint
             material = .liquidGlass
             return glass
         }
         let blur = NSVisualEffectView(frame: bounds)
-        blur.material = .popover
+        blur.material = .hudWindow
         blur.blendingMode = .behindWindow
         blur.state = .active
         blur.wantsLayer = true
         blur.layer?.cornerRadius = cornerRadius
         blur.layer?.masksToBounds = true
-        blur.addSubview(content)
+        tint.frame = bounds
+        content.frame = bounds
+        content.autoresizingMask = [.width, .height]
+        tint.addSubview(content)
+        blur.addSubview(tint)
         material = .visualEffect
         return blur
     }

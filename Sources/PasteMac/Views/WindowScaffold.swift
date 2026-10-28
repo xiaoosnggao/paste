@@ -7,7 +7,7 @@ enum WindowMetrics {
     /// full-size content view, so the traffic lights sit inside this strip.
     static let titleBarHeight: CGFloat = 44
     /// Clears the close, minimize and zoom buttons.
-    static let trafficLightInset: CGFloat = 76
+    static let trafficLightInset: CGFloat = 84
     static let contentPadding = DesignTokens.Space.lg
     static let sectionSpacing = DesignTokens.Space.md
     static let footerHeight: CGFloat = 52
@@ -30,6 +30,8 @@ struct WindowScaffold<Accessory: View, Content: View, Footer: View>: View {
 
     let title: String
     var subtitle: String?
+    /// Quiet line centered in a window's title bar, between the traffic lights and the toolbar.
+    var caption: String?
     var chrome: Chrome
     /// Content scrolls when the window or sheet is too short for it.
     var scrolls: Bool
@@ -38,16 +40,20 @@ struct WindowScaffold<Accessory: View, Content: View, Footer: View>: View {
     let footer: Footer
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
-    init(_ title: String, subtitle: String? = nil, chrome: Chrome = .window, scrolls: Bool = false,
+    init(_ title: String, subtitle: String? = nil, caption: String? = nil, chrome: Chrome = .window, scrolls: Bool = false,
          @ViewBuilder accessory: () -> Accessory, @ViewBuilder content: () -> Content, @ViewBuilder footer: () -> Footer) {
         self.title = title
         self.subtitle = subtitle
+        self.caption = caption
         self.chrome = chrome
         self.scrolls = scrolls
         self.accessory = accessory()
         self.content = content()
         self.footer = footer()
     }
+
+    /// Measured from the window's close button; fallback until the window exists.
+    @State private var trafficLightCenterY = PopupMetrics.trafficLightCenterY
 
     var body: some View {
         VStack(spacing: 0) {
@@ -96,8 +102,18 @@ struct WindowScaffold<Accessory: View, Content: View, Footer: View>: View {
             accessory.fixedSize()
         }
         .padding(.leading, chrome == .window ? WindowMetrics.trafficLightInset : WindowMetrics.contentPadding)
-        .padding(.trailing, chrome == .window ? DesignTokens.Space.md : WindowMetrics.contentPadding)
-        .frame(height: WindowMetrics.titleBarHeight)
+        .padding(.trailing, chrome == .window ? PopupMetrics.toolbarTrailingInset : WindowMetrics.contentPadding)
+        // Windows: center the toolbar on the traffic lights, not on the 44 pt strip.
+        .frame(height: chrome == .window ? trafficLightCenterY * 2 : WindowMetrics.titleBarHeight)
+        .overlay {
+            if chrome == .window, let caption, !caption.isEmpty {
+                Text(caption).font(.scaled(.caption, weight: .medium)).foregroundStyle(PanelPalette.secondaryText)
+                    .lineLimit(1).truncationMode(.middle).help(caption)
+                    .padding(.horizontal, 140).allowsHitTesting(false)
+            }
+        }
+        .frame(height: chrome == .window ? max(WindowMetrics.titleBarHeight, trafficLightCenterY * 2) : WindowMetrics.titleBarHeight, alignment: .top)
+        .background { if chrome == .window { TrafficLightReader { trafficLightCenterY = $0 }.frame(width: 0, height: 0) } }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(title)
     }

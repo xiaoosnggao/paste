@@ -5,9 +5,9 @@ import SwiftUI
 /// Light neutrals are sampled from the installed Raycast root window.
 enum PanelPalette {
     static let canvas = adaptive(light: 0xECEAED, dark: 0x202124)
-    static let surface = adaptive(light: 0xF2F1F3, dark: 0x292A2E)
-    static let raised = adaptive(light: 0xE5E3E7, dark: 0x303136)
-    static let hover = adaptive(light: 0xDFDDE1, dark: 0x383A40)
+    static let surface = adaptive(light: 0xFAF9FB, dark: 0x2E2F34)
+    static let raised = adaptive(light: 0xF1EFF3, dark: 0x37383E)
+    static let hover = adaptive(light: 0xE6E4E9, dark: 0x414349)
     static let selection = adaptive(light: 0xFFFFFF, dark: 0xDCE8FF)
     static let selectionText = adaptive(light: 0x111827, dark: 0x111827)
     static let selectionSecondaryText = adaptive(light: 0x46546B, dark: 0x34445F)

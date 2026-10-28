@@ -10,6 +10,85 @@ enum PopupMetrics {
     static let margin: CGFloat = 20
     static let gap: CGFloat = 12
     static let toolbarHeight: CGFloat = 56
+    /// Right column in the preview (suggestions, recognition). Shared by every
+    /// item kind so the column sits at the same x and width for text and images.
+    static let sideColumnWidth: CGFloat = 300
+    /// Diameter of a title-bar glass button.
+    static let glassButtonSize: CGFloat = 22
+    /// Outer height of a title-bar glass control (pill height = circle diameter).
+    static var glassControlHeight: CGFloat { glassButtonSize + 4 }
+    /// Fallback for the traffic lights' center line until it is measured from the window.
+    static let trafficLightCenterY: CGFloat = TrafficLightGeometry.targetCenterFromTop
+    /// Gap from the window's right edge to the last title-bar control, mirroring the traffic lights' left inset.
+    static let toolbarTrailingInset: CGFloat = 16
+}
+
+/// Title-bar toolbar controls in the macOS 26 Liquid Glass style: buttons sit on one
+/// shared glass capsule; older systems get a quiet material capsule instead.
+struct PopupGlassToolbar<Content: View>: View {
+    @ViewBuilder let content: Content
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    var body: some View {
+        let row = HStack(spacing: 0) { content }.padding(.horizontal, 2).frame(height: PopupMetrics.glassControlHeight)
+        Group {
+            if #available(macOS 26.0, *), !reduceTransparency {
+                GlassEffectContainer { row.glassEffect(.regular, in: Capsule()) }
+            } else {
+                row.background(.thinMaterial, in: Capsule())
+                    .overlay(Capsule().strokeBorder(Color.primary.opacity(0.08), lineWidth: 1))
+            }
+        }
+        .fixedSize()
+    }
+}
+
+/// A single round glass control (e.g. the ⋯ menu): a true circle, the same diameter as the pill.
+struct PopupGlassCircle<Content: View>: View {
+    @ViewBuilder let content: Content
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    var body: some View {
+        let d = PopupMetrics.glassControlHeight
+        let core = content.frame(width: d, height: d).contentShape(Circle()).clipShape(Circle())
+        Group {
+            if #available(macOS 26.0, *), !reduceTransparency {
+                GlassEffectContainer { core.glassEffect(.regular, in: Circle()) }
+            } else {
+                core.background(.thinMaterial, in: Circle())
+                    .overlay(Circle().strokeBorder(Color.primary.opacity(0.08), lineWidth: 1))
+            }
+        }
+        .frame(width: d, height: d)
+        .fixedSize()
+    }
+}
+
+/// Icon button inside a `PopupGlassToolbar`. No focus ring; hover is a soft circle.
+struct PopupToolbarButton: View {
+    let symbol: String
+    let label: String
+    let action: () -> Void
+    @State private var hovering = false
+    @Environment(\.isEnabled) private var isEnabled
+    var body: some View {
+        Button(action: action) { PopupToolbarGlyph(symbol: symbol, hovering: hovering && isEnabled) }
+            .buttonStyle(.plain)
+            .focusEffectDisabled()
+            .opacity(isEnabled ? 1 : 0.35)
+            .onHover { hovering = $0 }
+            .help(label).accessibilityLabel(label)
+    }
+}
+
+struct PopupToolbarGlyph: View {
+    let symbol: String
+    var hovering = false
+    var body: some View {
+        Image(systemName: symbol).font(.scaled(.label, weight: .semibold))
+            .foregroundStyle(PanelPalette.text)
+            .frame(width: PopupMetrics.glassButtonSize, height: PopupMetrics.glassButtonSize)
+            .background(Circle().fill(Color.primary.opacity(hovering ? 0.10 : 0)))
+            .contentShape(Circle())
+    }
 }
 
 extension View {
@@ -30,13 +109,14 @@ private struct PopupCard: ViewModifier {
         content
             .padding(padding)
             .background {
-                shape.fill(Color(nsColor: .textBackgroundColor).opacity(reduceTransparency ? 1 : (scheme == .dark ? 0.32 : 0.78)))
+                // Opaque card one step lighter than the tinted window, so it reads in both modes.
+                shape.fill(scheme == .dark ? PanelPalette.surface : Color.white)
                     // Shadow on the card shape only, so text inside stays crisp.
-                    .shadow(color: .black.opacity(scheme == .dark ? 0.25 : 0.06), radius: 10, y: 3)
+                    .shadow(color: .black.opacity(scheme == .dark ? 0.30 : 0.10), radius: 10, y: 3)
                 if let tint { shape.fill(tint.opacity(scheme == .dark ? 0.10 : 0.06)) }
             }
             .overlay {
-                shape.strokeBorder(focused ? PanelPalette.accent.opacity(0.55) : Color.primary.opacity(scheme == .dark ? 0.08 : 0.05),
+                shape.strokeBorder(focused ? PanelPalette.accent.opacity(0.55) : Color.primary.opacity(scheme == .dark ? 0.10 : 0.09),
                                    lineWidth: focused ? 1.5 : 1)
             }
     }
@@ -78,7 +158,7 @@ struct PopupSegmentedControl<Value: Hashable & Identifiable>: View {
             }
         }
         .padding(3)
-        .background(Capsule().fill(Color.primary.opacity(scheme == .dark ? 0.10 : 0.06)))
+        .modifier(GlassTrack())
         .fixedSize()
     }
 }
@@ -169,4 +249,17 @@ struct PopupCardHeader<Trailing: View>: View {
 
 extension PopupCardHeader where Trailing == EmptyView {
     init(_ title: String, symbol: String? = nil) { self.init(title, symbol: symbol) { EmptyView() } }
+}
+
+/// The segmented control's track: Liquid Glass on macOS 26, a recessed capsule before.
+private struct GlassTrack: ViewModifier {
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    func body(content: Content) -> some View {
+        if #available(macOS 26.0, *), !reduceTransparency {
+            content.glassEffect(.regular, in: Capsule())
+        } else {
+            content.background(Capsule().fill(Color.primary.opacity(scheme == .dark ? 0.10 : 0.06)))
+        }
+    }
 }
