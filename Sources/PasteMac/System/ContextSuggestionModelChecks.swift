@@ -84,24 +84,55 @@ enum ContextSuggestionModelChecks {
         let detailCalls = ContextSuggestionRecorder()
         let detailed = make(detailCalls)
         try await eventually { detailed.contextSuggestionsVisible }
-        detailed.openPanelDetail(.preview, itemID: source.id)
+        detailed.openPanelDetail(.intelligence, itemID: source.id)
         try check(!detailed.contextSuggestionsPresented && detailed.contextSuggestionKey == nil,
                   "opening detail left the suggestions bar presented")
         try check(detailed.activeHistoryReferences["detail"] == [source.id], "detail did not retain its card's payload")
         detailed.select(other)
         try await settle()
-        try check(detailed.panelDetail?.itemID == other.id, "preview did not follow the selected card")
+        try check(detailed.panelDetail?.itemID == source.id, "a detail page followed the selection")
         try check(await detailCalls.inputs.count == 1 && !detailed.contextSuggestionsPresented,
                   "moving the selection under detail requested suggestions")
-        detailed.selectedIDs = [source.id, other.id]
-        try check(detailed.panelDetail?.itemID == other.id, "multi-selection changed the previewed card")
-        detailed.select(other)
         detailed.closePanelDetail()
         try check(detailed.activeHistoryReferences["detail"] == nil, "closing detail kept its payload reference")
         try await eventually { detailed.contextSuggestionsVisible && detailed.contextSuggestions.first?.title == other.text }
+
+        // Preview is a window again: it never opens the layer, follows the selection and ← →, and survives the panel hiding.
+        let calls = PreviewWindowCalls()
+        detailed.onPreview = { calls.shown.append($0.id) }
+        detailed.onPreviewClose = { calls.closes += 1 }
+        detailed.onRevealPanel = { calls.reveals += 1 }
+        detailed.onEditor = { [weak detailed] in detailed?.openPanelEditor($0) }
         detailed.openPanelDetail(.preview, itemID: source.id)
+        try check(detailed.panelDetail == nil && detailed.previewItemID == source.id && calls.shown == [source.id],
+                  "preview opened in the detail layer instead of its window")
+        try check(detailed.activeHistoryReferences["preview"] == [source.id], "the preview window did not retain its card's payload")
+        detailed.select(other)
+        try check(detailed.previewItemID == other.id, "the preview window did not follow the selected card")
+        detailed.selectedIDs = [source.id, other.id]
+        try check(detailed.previewItemID == other.id, "multi-selection changed the previewed card")
+        let order = detailed.visibleItems.map(\.id)
+        if let index = order.firstIndex(of: other.id) {
+            detailed.movePreview(-1)
+            let expected = index > 0 ? order[index - 1] : other.id
+            try check(detailed.previewItemID == expected && detailed.selectedIDs == [expected], "← in the preview did not show the previous card")
+            detailed.movePreview(1)
+            let back = index > 0 ? other.id : (order.count > 1 ? order[1] : other.id)
+            try check(detailed.previewItemID == back, "→ in the preview did not show the next card")
+        }
+        detailed.select(other)
         detailed.panelDidHide()
-        try check(detailed.panelDetail == nil, "hiding the panel kept the preview open")
+        try check(detailed.previewItemID == other.id, "hiding the panel closed the preview window")
+        detailed.togglePreview()
+        try check(detailed.previewItemID == nil && calls.closes == 1 && detailed.activeHistoryReferences["preview"] == nil,
+                  "Space did not close the preview window")
+        detailed.togglePreview()
+        try check(detailed.previewItemID == other.id, "Space did not open the preview window")
+        detailed.openFromPreview(.edit, item: other)
+        try check(detailed.previewItemID == nil && calls.reveals == 1 && detailed.panelDetail == PanelDetailState(itemID: other.id, page: .edit),
+                  "编辑 in the preview window did not open the panel's edit page")
+        detailed.cancelPanelEditor()
+        detailed.onPreview = nil; detailed.onPreviewClose = nil; detailed.onRevealPanel = nil; detailed.onEditor = nil
 
         // Edit page: the draft survives Esc and hiding; Cancel drops it; ⌘S saves through the same save.
         detailed.openPanelEditor(source)
@@ -135,7 +166,7 @@ enum ContextSuggestionModelChecks {
         // Translate page: leaving it ends the tool session, as closing the tool window did.
         detailed.toolSessionActive = true
         detailed.openPanelDetail(.translate, itemID: other.id)
-        detailed.openPanelDetail(.preview, itemID: other.id)
+        detailed.openPanelDetail(.intelligence, itemID: other.id)
         try check(!detailed.toolSessionActive && !detailed.toolsHostedInPanel, "leaving the translate page kept the tool session")
         detailed.toolSessionActive = true
         detailed.openPanelDetail(.translate, itemID: other.id)
@@ -403,5 +434,15 @@ private final class ContextSuggestionPasteEnvironment: PasteDispatchEnvironment 
     func frontmostPID() -> pid_t? { 42 }
     func sendPaste(_ target: PasteTarget) async -> Bool { sendCount += 1; return true }
     func settle() async { await Task.yield() }
+}
+#endif
+
+#if DEBUG
+/// What the preview window's callbacks saw during the checks.
+@MainActor
+private final class PreviewWindowCalls {
+    var shown: [UUID] = []
+    var closes = 0
+    var reveals = 0
 }
 #endif

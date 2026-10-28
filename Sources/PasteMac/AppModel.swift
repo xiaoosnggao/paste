@@ -10,12 +10,14 @@ final class AppModel: ObservableObject {
     @Published var snapshot: ClipboardSnapshot { didSet { trackStorageChanges(from: oldValue); cachedVisibleItems = nil; restoreSession(); scheduleContextSuggestions() } }
     @Published var queryString = "" { didSet { cachedVisibleItems = nil; scheduleHistoryQuery(); scheduleContextSuggestions() } }
     @Published var selectedPinboardID: UUID? { didSet { cachedVisibleItems = nil; scheduleHistoryQuery(); scheduleContextSuggestions() } }
-    @Published var selectedIDs: Set<UUID> = [] { didSet { scheduleContextSuggestions(); syncPanelDetailToSelection() } }
+    @Published var selectedIDs: Set<UUID> = [] { didSet { scheduleContextSuggestions(); syncPreviewToSelection() } }
     @Published var filter = ClipFilter() { didSet { cachedVisibleItems = nil; scheduleHistoryQuery(); scheduleContextSuggestions() } }
     @Published var isSearchVisible = false
     /// The detail layer above the deck, or nil when only the deck shows.
     @Published var panelDetail: PanelDetailState? { didSet { if panelDetail != oldValue { panelDetailChanged(from: oldValue) } } }
     /// The detail card height for the panel's current screen.
+    /// The card the preview window shows; nil while it is closed.
+    @Published var previewItemID: UUID?
     @Published var panelDetailContentHeight = PanelDetailLayout.contentHeight
     var onPanelDetailChange: (() -> Void)?
     /// Unsaved editor text per card (nil key: a new text). Kept while the panel hides.
@@ -147,6 +149,10 @@ final class AppModel: ObservableObject {
     var onEditor: ((ClipItem?) -> Void)?
     var onEditorClose: (() -> Void)?
     var onPreview: ((ClipItem) -> Void)?
+    /// Closes the preview window.
+    var onPreviewClose: (() -> Void)?
+    /// Brings the panel back so a detail page opened from the preview window shows.
+    var onRevealPanel: (() -> Void)?
     var onIntelligence: ((ClipItem) -> Void)?
     var onStack: (() -> Void)?
     /// Called after each 粘贴下一项 attempt so the capsule can move to the cursor.
@@ -424,7 +430,13 @@ final class AppModel: ObservableObject {
     func newText() { onEditor?(nil) }
     func edit(_ item: ClipItem) { if let loaded = materializedItems([item]).first { onEditor?(loaded) } }
     func closeEditor() { onEditorClose?() }
-    func preview(_ item: ClipItem) { if let loaded = materializedItems([item]).first { onPreview?(loaded) } }
+    /// Preview opens its own window above the panel. The full payload stays loaded while it shows.
+    func preview(_ item: ClipItem) {
+        guard let loaded = materializedItems([item]).first else { return }
+        if previewItemID != loaded.id { retainHistory([loaded.id], for: "preview") }
+        previewItemID = loaded.id
+        onPreview?(loaded)
+    }
     func intelligence(_ item: ClipItem) { if let loaded = materializedItems([item]).first { onIntelligence?(loaded) } }
     func showStack() {
         if stackItems.isEmpty { setStack(selectedItems) }
