@@ -4,7 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+    # ui/** so stacked UI pull requests (based on another ui/ branch) also get CI.
+    branches: [main, 'ui/**']
 
 concurrency:
   group: ci-${{ github.ref }}

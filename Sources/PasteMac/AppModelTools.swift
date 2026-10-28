@@ -72,7 +72,7 @@ extension AppModel {
     func performTool(_ action: ToolAction) {
         guard contextSuggestionApplyingID == nil else { return }
         dismissContextSuggestions()
-        guard !isPasting else { statusMessage = "正在粘贴，请稍后重试。"; return }
+        guard !isPasting else { notice = .info("正在粘贴，请稍后重试。"); return }
         onToolStart?()
         switch action {
         case .screenshotOCR, .screenshotTranslate:

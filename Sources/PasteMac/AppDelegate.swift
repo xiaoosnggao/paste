@@ -435,7 +435,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             hidePanel(restoreTarget: true); return true
         }
         if flags == .option, !textEditing,
-           let key = event.charactersIgnoringModifiers, let number = Int(key),
+           let number = PanelKeyboard.digit(for: event.keyCode),
            (1...5).contains(number), model.contextSuggestions.indices.contains(number - 1) {
             if !event.isARepeat { model.applyContextSuggestion(model.contextSuggestions[number - 1]) }
             return true
@@ -444,7 +444,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             if key == "f" { model.isSearchVisible.toggle(); return true }
             if key == "," { showSettings(); return true }
             if !textEditing {
-                if let number = Int(key), (1...9).contains(number), model.visibleItems.count >= number {
+                // Match the physical key: ⇧1 reads as "!" on US layouts.
+                if let number = PanelKeyboard.digit(for: event.keyCode), model.visibleItems.count >= number {
                     model.activate(model.visibleItems[number - 1], plainText: flags.contains(.shift)); return true
                 }
                 if key == "c" { model.copySelected(plainText: flags.contains(.shift)); return true }

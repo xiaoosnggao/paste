@@ -25,21 +25,39 @@ struct SettingsView: View {
         }
     }
 
+    /// Fallback for the transparent title bar height when the window reports no safe area.
+    private static let titlebarFallbackHeight: CGFloat = 28
+    private static var appVersion: String? {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+    }
+
     var body: some View {
+        // Measure the title bar before the content extends under it, so the
+        // sidebar clears the traffic lights on any title bar height.
+        GeometryReader { proxy in
+            content(titlebarInset: proxy.safeAreaInsets.top > 0 ? proxy.safeAreaInsets.top : Self.titlebarFallbackHeight)
+                .ignoresSafeArea(.container, edges: .top)
+        }.frame(minWidth: 640, minHeight: 520)
+    }
+
+    private func content(titlebarInset: CGFloat) -> some View {
         HStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 6) {
-                Color.clear.frame(height: 40)
+            VStack(alignment: .leading, spacing: 2) {
+                Color.clear.frame(height: titlebarInset + 12)
                 ForEach(SettingsPage.allCases) { entry in
                     Button { page = entry } label: {
                         Label(entry.rawValue, systemImage: entry.symbol)
-                            .font(.system(size: 14)).frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 14).padding(.vertical, 11)
+                            .font(.system(size: 13)).frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 12).padding(.vertical, 6)
                             .contentShape(Rectangle())
                     }.buttonStyle(PanelControlStyle(selected: page == entry)).focusEffectDisabled()
                         .accessibilityAddTraits(page == entry ? .isSelected : [])
                 }
                 Spacer()
-                Text("剪贴板历史管理").font(.caption).foregroundStyle(.secondary).padding(14)
+                if let version = Self.appVersion {
+                    Text("Pasteboard \(version)").font(.caption).foregroundStyle(.tertiary)
+                        .padding(.horizontal, 12).padding(.bottom, 12)
+                }
             }.padding(.horizontal, 10).frame(width: 200)
                 .background(Color(nsColor: .windowBackgroundColor).opacity(reduceTransparency ? 1 : 0.12))
             VStack(alignment: .leading, spacing: 0) {
@@ -62,7 +80,7 @@ struct SettingsView: View {
                 }.formStyle(.grouped).scrollContentBackground(.hidden)
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(nsColor: .controlBackgroundColor).opacity(reduceTransparency ? 1 : 0.18))
-        }.frame(minWidth: 640, minHeight: 520).ignoresSafeArea(.container, edges: .top)
+        }
             .confirmationDialog("删除全部未收藏的历史记录？", isPresented: $deleteConfirmation) {
                 Button("删除历史记录", role: .destructive) { model.clearHistory() }
                 Button("取消", role: .cancel) {}
