@@ -18,12 +18,6 @@ struct PastePanelView: View {
             toolbar
             Color.clear.frame(height: PanelMetrics.toolbarDeckSpacing)
             deck.frame(height: PanelMetrics.deckHeight)
-            if model.contextSuggestionsPresented {
-                ContextSuggestionsView(model: model)
-                    .frame(height: PanelPresentation.suggestionContentHeight + model.suggestionAdditionalHeight)
-                    .padding(.top, PanelPresentation.suggestionSpacing)
-                    .transition(.opacity)
-            }
         }
         .padding(.top, PanelMetrics.panelTopPadding).padding(.bottom, PanelMetrics.panelBottomPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)

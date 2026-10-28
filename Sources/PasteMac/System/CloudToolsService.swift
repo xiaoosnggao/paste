@@ -47,11 +47,11 @@ final class CloudToolsService: @unchecked Sendable {
     static let maximumFormBytes = 8 * 1024 * 1024
     static let maximumResponseBytes = 1024 * 1024
     static let maximumResultBytes = 256 * 1024
-    private let session: URLSession
+    let session: URLSession
     private let ownsSession: Bool
     private let credentialLoader: (CloudCredentialKind) -> String?
     private let aiServiceKeyLoader: (UUID) -> String?
-    private let redirectGuard = CloudRequestGuard()
+    let redirectGuard = CloudRequestGuard()
     init(session: URLSession = .shared, aiServiceKeyLoader: @escaping (UUID) -> String? = CloudToolCredentials.readAIServiceKey, credentialLoader: @escaping (CloudCredentialKind) -> String? = CloudToolCredentials.read) {
         self.credentialLoader = credentialLoader
         self.aiServiceKeyLoader = aiServiceKeyLoader
