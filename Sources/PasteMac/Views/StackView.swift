@@ -60,7 +60,6 @@ struct StackView: View {
             RoundedRectangle(cornerRadius: DesignTokens.Radius.md)
                 .strokeBorder(index == 0 ? PanelPalette.selectionBorder.opacity(0.6) : .clear, lineWidth: 1)
         }
-        .accessibilityElement(children: .combine)
     }
     private var orderedItems: [ClipItem] { model.stackReversed ? Array(model.stackItems.reversed()) : model.stackItems }
 }
