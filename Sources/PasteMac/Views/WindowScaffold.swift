@@ -99,7 +99,7 @@ struct WindowScaffold<Accessory: View, Content: View, Footer: View>: View {
             accessory.fixedSize()
         }
         .padding(.leading, chrome == .window ? WindowMetrics.trafficLightInset : WindowMetrics.contentPadding)
-        .padding(.trailing, chrome == .window ? DesignTokens.Space.md : WindowMetrics.contentPadding)
+        .padding(.trailing, chrome == .window ? PopupMetrics.toolbarTrailingInset : WindowMetrics.contentPadding)
         // Windows: center the toolbar on the traffic lights, not on the 44 pt strip.
         .frame(height: chrome == .window ? PopupMetrics.trafficLightCenterY * 2 : WindowMetrics.titleBarHeight)
         .overlay {

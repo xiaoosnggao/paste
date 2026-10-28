@@ -14,11 +14,13 @@ enum PopupMetrics {
     /// item kind so the column sits at the same x and width for text and images.
     static let sideColumnWidth: CGFloat = 300
     /// Diameter of a title-bar glass button.
-    static let glassButtonSize: CGFloat = 24
+    static let glassButtonSize: CGFloat = 22
     /// Outer height of a title-bar glass control (pill height = circle diameter).
     static var glassControlHeight: CGFloat { glassButtonSize + 4 }
     /// Vertical center of the traffic lights in a full-size-content window.
-    static let trafficLightCenterY: CGFloat = 16
+    static let trafficLightCenterY: CGFloat = 18
+    /// Gap from the window's right edge to the last title-bar control, mirroring the traffic lights' left inset.
+    static let toolbarTrailingInset: CGFloat = 16
 }
 
 /// Title-bar toolbar controls in the macOS 26 Liquid Glass style: buttons sit on one

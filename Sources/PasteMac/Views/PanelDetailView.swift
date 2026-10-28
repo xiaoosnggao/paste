@@ -92,7 +92,9 @@ struct PanelDetailScaffold<Content: View, Footer: View>: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.horizontal, WindowMetrics.trafficLightInset)
-        .frame(height: PopupMetrics.topBarHeight)
+        // Centered on the traffic lights' line, like the preview's toolbar.
+        .frame(height: PopupMetrics.trafficLightCenterY * 2)
+        .frame(height: PopupMetrics.topBarHeight, alignment: .top)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(item.map { "\(title)：\(Self.cardTitle($0))" } ?? title)
     }
