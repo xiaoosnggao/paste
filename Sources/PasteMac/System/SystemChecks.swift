@@ -313,6 +313,7 @@ enum SystemChecks {
         count += try await KnowledgeRegressionChecks.run()
         count += try HorizontalScrollRoutingChecks.run()
         count += try PanelPaletteChecks.run()
+        count += try PanelMetricsChecks.run()
         count += try await ContextSuggestionsChecks.run()
         count += try await ContextSuggestionModelChecks.run()
         count += try await ToolWorkflowChecks.run()

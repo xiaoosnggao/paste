@@ -97,7 +97,7 @@ struct ContextSuggestionsView: View {
             .frame(height: 108)
             .padding(.horizontal, 22).padding(.vertical, 12)
         }
-        .frame(height: 132)
+        .frame(height: PanelPresentation.suggestionContentHeight)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("AI 建议")
         .accessibilityValue(model.contextSuggestionsLoading ? "正在生成" : "\(model.contextSuggestions.count) 项建议")
