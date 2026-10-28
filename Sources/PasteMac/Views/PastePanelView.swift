@@ -53,7 +53,8 @@ struct PastePanelView: View {
                     ScrollView(.horizontal) {
                         LazyHStack(spacing: PanelMetrics.deckSpacing) {
                             if model.historyPageOffset > 0 {
-                                Button("上一页", action: model.loadPreviousHistoryPage).buttonStyle(.bordered)
+                                HistoryPagerTile(direction: .newer, loading: false, action: model.loadPreviousHistoryPage)
+                                    .disabled(model.historyLoading)
                             }
                             ForEach(Array(model.visibleItems.enumerated()), id: \.element.id) { index, item in
                                 ClipCard(item: item, selected: model.selectedIDs.contains(item.id), index: index, categories: model.categories(for: item.id))
@@ -79,9 +80,9 @@ struct PastePanelView: View {
                                     }
                             }
                             if model.historyHasMore {
-                                Button { if let last = model.historyResultIDs.last { model.loadNextHistoryPage(after: last) } } label: {
-                                    Label(model.historyLoading ? "读取中" : "更多", systemImage: "chevron.right")
-                                }.buttonStyle(.bordered).disabled(model.historyLoading)
+                                HistoryPagerTile(direction: .older, loading: model.historyLoading) {
+                                    if let last = model.historyResultIDs.last { model.loadNextHistoryPage(after: last) }
+                                }.disabled(model.historyLoading)
                             }
                         }.padding(.horizontal, PanelMetrics.deckHorizontalPadding).padding(.vertical, PanelMetrics.deckVerticalPadding)
                             .horizontalScrollWheelRouting()
@@ -519,5 +520,41 @@ extension Color {
         } else { alpha = 1 }
         let value = UInt64(text, radix: 16) ?? 0x6F81CE
         self.init(red: Double((value >> 16) & 255) / 255, green: Double((value >> 8) & 255) / 255, blue: Double(value & 255) / 255, opacity: alpha)
+    }
+}
+
+/// Card-height tile at either end of the deck that pages through history,
+/// so paging reads as part of the card row instead of a stray form button.
+private struct HistoryPagerTile: View {
+    enum Direction { case newer, older }
+    let direction: Direction
+    let loading: Bool
+    let action: () -> Void
+    @State private var hovered = false
+    @Environment(\.isEnabled) private var isEnabled
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: PanelMetrics.cardCornerRadius)
+        Button(action: action) {
+            VStack(spacing: 8) {
+                if loading {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: direction == .newer ? "chevron.left" : "chevron.right")
+                        .font(.system(size: 15, weight: .semibold))
+                }
+                Text(loading ? "读取中" : (direction == .newer ? "较新" : "更早"))
+                    .font(.system(size: 12, weight: .medium))
+            }
+            .foregroundStyle(PanelPalette.secondaryText)
+            .frame(width: 72, height: PanelMetrics.cardHeight)
+            .background(hovered && isEnabled ? PanelPalette.hover : PanelPalette.surface.opacity(0.6), in: shape)
+            .overlay(shape.strokeBorder(PanelPalette.border.opacity(hovered && isEnabled ? 0.9 : 0.45), lineWidth: hovered && isEnabled ? 1 : 0.75))
+            .contentShape(shape)
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .help(direction == .newer ? "显示较新的 50 条" : "加载更早的 50 条")
+        .accessibilityLabel(direction == .newer ? "显示较新的记录" : "加载更早的记录")
     }
 }
