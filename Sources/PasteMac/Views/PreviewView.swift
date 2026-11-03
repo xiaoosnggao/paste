@@ -9,7 +9,16 @@ private struct PreviewImageRevision: Hashable {
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
-/// The detail layer's preview page.
+/// The preview window. It opens above the panel and follows ← and →;
+/// editing, translation and smart processing open in the panel from its buttons.
+struct PreviewWindowView: View {
+    @ObservedObject var model: AppModel
+    var body: some View {
+        // A fresh view per card resets the image and link state.
+        PreviewView(model: model, itemID: model.previewItemID).id(model.previewItemID)
+    }
+}
+
 struct PreviewView: View {
     @ObservedObject var model: AppModel
     let itemID: UUID?
@@ -20,32 +29,56 @@ struct PreviewView: View {
     var body: some View {
         Group {
             if let value = current {
-                PanelDetailScaffold(model: model, item: value, page: .preview,
-                                    title: value.title.isEmpty ? value.kind.displayName : value.title,
-                                    subtitle: "\(value.sourceName) · \(value.createdAt.formatted(date: .abbreviated, time: .shortened))") {
+                WindowScaffold(value.title.isEmpty ? value.kind.displayName : value.title,
+                               subtitle: "\(value.sourceName) · \(value.createdAt.formatted(date: .abbreviated, time: .shortened))") {
+                    accessory(value)
+                } content: {
                     HStack(alignment: .top, spacing: DesignTokens.Space.lg) {
                         mainContent(value).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                         if value.kind == .image || value.kind == .text || value.kind == .link {
                             ScrollView { ClipEnrichmentView(model: model, item: value).controlSize(.small) }
                                 .scrollIndicators(.automatic)
-                                .frame(width: 360)
+                                .frame(width: 300)
                         }
                     }
                 } footer: {
                     footer(value)
                 }
             } else {
-                PanelDetailScaffold(model: model, item: nil, page: .preview, title: "预览") {
+                WindowScaffold("预览") {
                     ContentUnavailableView("此卡片已删除", systemImage: "trash").frame(maxWidth: .infinity, maxHeight: .infinity)
                 } footer: {
                     Spacer()
-                    Button("关闭") { model.closePanelDetail() }
+                    WindowCloseButton()
                 }
             }
         }
+        .frame(minWidth: 560, minHeight: 420)
         .task(id: current.map { PreviewImageRevision(id: $0.id, representations: $0.representations) }) { await loadThumbnail() }
         .onDisappear { links.cancel() }
         .onChange(of: current?.text) { _, _ in links.reset() }
+    }
+    /// Source, list navigation and the jumps to the panel's pages.
+    private func accessory(_ value: ClipItem) -> some View {
+        let items = model.visibleItems
+        let index = items.firstIndex { $0.id == value.id }
+        return HStack(spacing: DesignTokens.Space.sm) {
+            SourceIcon(item: value).frame(width: 20, height: 20).accessibilityHidden(true)
+            ControlGroup {
+                Button { model.movePreview(-1) } label: { Image(systemName: "chevron.left") }
+                    .disabled(index.map { $0 == 0 } ?? true)
+                    .help("上一张 (←)").accessibilityLabel("上一张")
+                Button { model.movePreview(1) } label: { Image(systemName: "chevron.right") }
+                    .disabled(index.map { $0 >= items.count - 1 } ?? true)
+                    .help("下一张 (→)").accessibilityLabel("下一张")
+            }
+            .controlSize(.small).fixedSize()
+            ForEach(PanelDetailPage.layerPages.filter { $0.isAvailable(for: value) }) { page in
+                Button(page.title, systemImage: page.systemImage) { model.openFromPreview(page, item: value) }
+                    .controlSize(.small)
+                    .help("在面板中\(page.title) (\(page.shortcutLabel))")
+            }
+        }
     }
     @ViewBuilder private func mainContent(_ value: ClipItem) -> some View {
         if value.kind == .image { imageContent(value) }
@@ -89,8 +122,9 @@ struct PreviewView: View {
             }
         }
         Button("复制", systemImage: "doc.on.doc") { model.select(value); model.copySelected() }
+        WindowCloseButton()
         Button("粘贴") { model.activate(value) }
-            .buttonStyle(.borderedProminent).foregroundStyle(PanelPalette.onAccent)
+            .windowPrimaryAction()
             .help("粘贴到当前应用 (↩)")
     }
     private func imageContent(_ value: ClipItem) -> some View {

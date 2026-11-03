@@ -66,6 +66,10 @@ enum PanelDetailChecks {
         try check(PanelDetailPage.intelligence.isAvailable(for: text) && !PanelDetailPage.intelligence.isAvailable(for: image),
                   "smart page availability differs from the preview button")
         try check([image, file, text, empty].allSatisfy { PanelDetailPage.preview.isAvailable(for: $0) }, "preview was unavailable for a card")
+        try check(PanelDetailPage.layerPages.first == .edit && !PanelDetailPage.layerPages.contains(.preview),
+                  "the detail layer did not default to the edit page")
+        try check(!PanelDetailPage.preview.opensInPanel && PanelDetailPage.layerPages.allSatisfy(\.opensInPanel),
+                  "preview opened in the panel instead of its window")
 
         typealias K = PanelDetailKey
         func key(_ page: PanelDetailPage, _ code: UInt16, _ flags: NSEvent.ModifierFlags = [], _ chars: String? = nil,

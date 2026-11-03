@@ -3,12 +3,17 @@ import PasteCore
 
 /// A page of the detail layer that opens above the card deck.
 ///
-/// Preview, editing, translation and smart processing used to open separate
-/// windows. They now share one layer inside the clipboard panel.
+/// Editing, translation and smart processing share one layer inside the
+/// clipboard panel. Preview opens its own window; its case stays so the page
+/// bar, hover actions and context menu can offer it next to the others.
 enum PanelDetailPage: String, CaseIterable, Identifiable, Sendable {
     case preview, edit, translate, intelligence
 
     var id: String { rawValue }
+    /// The layer's own pages. Edit comes first and is the default.
+    static let layerPages: [PanelDetailPage] = [.edit, .translate, .intelligence]
+    /// Whether the page opens in the panel instead of the preview window.
+    var opensInPanel: Bool { self != .preview }
     var title: String {
         switch self {
         case .preview: "预览"
