@@ -19,7 +19,14 @@ enum LocalKnowledgeAcceptanceChecks {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("knowledge-acceptance-\(UUID())")
         defer { try? FileManager.default.removeItem(at: directory) }
         let provider = LocalKnowledgeEmbeddingProvider()
-        let automaticallyDetected = try await provider.embed("乘坐火车去海边旅行，提前预订酒店房间。")
+        let automaticallyDetected: KnowledgeVector
+        do {
+            automaticallyDetected = try await provider.embed("乘坐火车去海边旅行，提前预订酒店房间。")
+        } catch LocalKnowledgeEmbeddingProvider.Failure.modelUnavailable {
+            // Every acceptance step below indexes real local vectors; availability is a host property.
+            print("SKIP: local knowledge acceptance checks (local sentence-embedding model unavailable)")
+            return count
+        }
         let explicitlyTraditional = try await provider.embed("資料庫遷移之前需要備份。", languageCode: "zh-Hant")
         try check(automaticallyDetected.namespace.language.hasPrefix("zh"), "short Chinese detection lost the available local model")
         if NLEmbedding.sentenceEmbedding(for: .traditionalChinese) == nil {

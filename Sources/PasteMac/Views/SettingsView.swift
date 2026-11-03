@@ -181,9 +181,19 @@ struct SettingsView: View {
         Section("面板操作") {
             shortcutRow("搜索", "⌘F")
             shortcutRow("选择上一项 / 下一项", "← / →")
+            shortcutRow("切换收藏夹", "⌘← / ⌘→")
+            shortcutRow("全选", "⌘A")
             shortcutRow("粘贴所选卡片", "↩")
             shortcutRow("粘贴为纯文本", "⇧↩")
             shortcutRow("快速粘贴", "⌘1…9")
+            shortcutRow("复制 / 复制为纯文本", "⌘C / ⇧⌘C")
+            shortcutRow("预览", "空格")
+            shortcutRow("打开文件或链接", "⌘O")
+            shortcutRow("删除所选卡片", "⌫")
+            shortcutRow("撤销 / 重做", "⌘Z / ⇧⌘Z")
+            shortcutRow("新建文本 / 新建收藏夹", "⌘N / ⇧⌘N")
+            shortcutRow("应用 AI 建议", "⌥1…5")
+            shortcutRow("打开设置", "⌘,")
             shortcutRow("关闭面板", "Esc")
         }
     }

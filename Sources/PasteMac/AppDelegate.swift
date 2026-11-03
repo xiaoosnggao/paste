@@ -296,7 +296,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
     private func showStack() {
         model.pasteEngine.rememberTarget()
-        if stackWindow == nil { stackWindow = window(title: "连续粘贴", size: .init(width: 360, height: 490), view: StackView(model: model)) }
+        // StackView needs at least 440pt; a narrower window clips its content.
+        if stackWindow == nil { stackWindow = window(title: "连续粘贴", size: .init(width: 440, height: 490), view: StackView(model: model)) }
         stackWindow?.level = .floating
         NSApp.activate()
         stackWindow?.makeKeyAndOrderFront(nil)
@@ -318,8 +319,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         menu.addItem(item("选中文字翻译", selector: #selector(openSelectionTranslation)))
         menu.addItem(.separator())
         menu.addItem(item("设置…", selector: #selector(openSettings), key: ","))
-        menu.addItem(item("恢复记录", selector: #selector(resume)))
-        menu.addItem(item("暂停 15 分钟", selector: #selector(pause)))
+        menu.addItem(item("恢复收集", selector: #selector(resume)))
+        menu.addItem(item("暂停收集 15 分钟", selector: #selector(pause)))
         menu.addItem(.separator())
         menu.addItem(item("退出 Pasteboard", selector: #selector(quit), key: "q"))
         statusItem.menu = menu
@@ -363,6 +364,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     func menuWillOpen(_ menu: NSMenu) {
         updateShortcutMenu(menu, clipboard: model.hotKeyDescription, stack: model.stackHotKeyDescription,
                            bindings: model.toolShortcuts?.bindings ?? [:])
+        // Offer only the pause action that applies right now.
+        for entry in menu.items {
+            if entry.action == #selector(resume) { entry.isHidden = !model.isPaused }
+            else if entry.action == #selector(pause) { entry.isHidden = model.isPaused }
+        }
     }
     private func updateShortcutMenu(_ menu: NSMenu, clipboard: String, stack: String, bindings: [ToolAction: ToolShortcut]) {
         let tools: [(Selector, ToolAction)] = [

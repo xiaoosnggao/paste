@@ -9,12 +9,13 @@ struct PastePanelView: View {
     @State private var renameText = ""
     @State private var searchFocused = false
     @State private var boardNameFocused: UUID?
+    @State private var pendingBoardDeletion: Pinboard?
 
     var body: some View {
         VStack(spacing: 0) {
             toolbar
-            Color.clear.frame(height: 17)
-            deck.frame(height: 242)
+            Color.clear.frame(height: PanelMetrics.toolbarDeckSpacing)
+            deck.frame(height: PanelMetrics.deckHeight)
             if model.contextSuggestionsPresented {
                 ContextSuggestionsView(model: model)
                     .frame(height: PanelPresentation.suggestionContentHeight + model.suggestionAdditionalHeight)
@@ -22,18 +23,26 @@ struct PastePanelView: View {
                     .transition(.opacity)
             }
         }
-        .padding(.top, 14).padding(.bottom, 15)
+        .padding(.top, PanelMetrics.panelTopPadding).padding(.bottom, PanelMetrics.panelBottomPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .foregroundStyle(PanelPalette.text)
         .tint(PanelPalette.accent)
         .background(Color.clear)
-        .clipShape(RoundedRectangle(cornerRadius: 25))
+        .clipShape(RoundedRectangle(cornerRadius: PanelMetrics.panelCornerRadius))
         .overlay(alignment: .bottomTrailing) { statusNotice }
         .onChange(of: model.isSearchVisible) { _, visible in searchFocused = visible }
         .onChange(of: model.queryString) { _, _ in model.selectFirstIfNeeded() }
         .onChange(of: model.filter) { _, _ in model.selectFirstIfNeeded() }
         .sheet(item: $classificationBoard) { board in CategoryClassificationSettings(model: model, board: board) }
         .onChange(of: model.selectedPinboardID) { _, _ in model.selectFirstIfNeeded() }
+        .confirmationDialog(pendingBoardDeletion.map { "删除收藏夹“\($0.name)”？" } ?? "删除收藏夹？",
+                            isPresented: Binding(get: { pendingBoardDeletion != nil }, set: { if !$0 { pendingBoardDeletion = nil } }),
+                            titleVisibility: .visible, presenting: pendingBoardDeletion) { board in
+            Button("删除", role: .destructive) { model.deletePinboard(board.id) }
+            Button("取消", role: .cancel) {}
+        } message: { _ in
+            Text("其中的卡片仍保留在剪贴板历史中，可按 ⌘Z 撤销。")
+        }
     }
 
     @ViewBuilder private var deck: some View {
@@ -42,7 +51,7 @@ struct PastePanelView: View {
             } else {
                 ScrollViewReader { proxy in
                     ScrollView(.horizontal) {
-                        LazyHStack(spacing: 14) {
+                        LazyHStack(spacing: PanelMetrics.deckSpacing) {
                             if model.historyPageOffset > 0 {
                                 Button("上一页", action: model.loadPreviousHistoryPage).buttonStyle(.bordered)
                             }
@@ -51,12 +60,9 @@ struct PastePanelView: View {
                                     .id(item.id)
                                     .onAppear { model.loadDisplayPayload(item.id) }
                                     .onDisappear { model.releaseDisplayPayload(item.id) }
-                                    .gesture(TapGesture(count: 2).exclusively(before: TapGesture(count: 1)).onEnded { result in
-                                        switch result {
-                                        case .first: model.activate(item)
-                                        case .second: model.select(item, extend: NSEvent.modifierFlags.contains(.command) || NSEvent.modifierFlags.contains(.shift))
-                                        }
-                                    })
+                                    // Select on the first click instead of waiting out the double-click interval.
+                                    .onTapGesture(count: 2) { model.activate(item) }
+                                    .simultaneousGesture(TapGesture().onEnded { selectOnClick(item) })
                                     .help("单击选择，双击粘贴")
                                     .accessibilityAction { model.select(item) }
                                     .accessibilityAction(named: Text("粘贴")) { model.activate(item) }
@@ -77,7 +83,7 @@ struct PastePanelView: View {
                                     Label(model.historyLoading ? "读取中" : "更多", systemImage: "chevron.right")
                                 }.buttonStyle(.bordered).disabled(model.historyLoading)
                             }
-                        }.padding(.horizontal, 20).padding(.vertical, 5)
+                        }.padding(.horizontal, PanelMetrics.deckHorizontalPadding).padding(.vertical, PanelMetrics.deckVerticalPadding)
                             .horizontalScrollWheelRouting()
                     }.scrollIndicators(.never)
                         .onChange(of: model.selectedIDs) { _, ids in
@@ -112,23 +118,25 @@ struct PastePanelView: View {
             let controlsWidth: CGFloat = model.isSearchVisible ? 240 + searchWidth : 192
             let boardWidth = min(620, boardToolbarWidth, max(0, available - controlsWidth))
             ZStack(alignment: .trailing) {
-                HStack(spacing: 8) {
+                HStack(spacing: PanelMetrics.toolbarSpacing) {
                     Button { model.usesRecommendations.toggle() } label: {
-                        Image(systemName: "sparkles").font(.system(size: 15)).frame(width: 32, height: 32).contentShape(Rectangle())
+                        Image(systemName: "sparkles").font(.system(size: 15)).frame(width: PanelMetrics.controlSize, height: PanelMetrics.controlSize).contentShape(Rectangle())
                     }.buttonStyle(PanelControlStyle(selected: model.usesRecommendations)).focusEffectDisabled().help("按当前应用和最近使用情况推荐")
+                    .accessibilityLabel("智能推荐")
                     .accessibilityValue(model.usesRecommendations ? "已开启" : "未开启")
                     Button { model.isSearchVisible.toggle() } label: {
-                        Image(systemName: "magnifyingglass").font(.system(size: 15, weight: .medium)).frame(width: 32, height: 32).contentShape(Rectangle())
+                        Image(systemName: "magnifyingglass").font(.system(size: 15, weight: .medium)).frame(width: PanelMetrics.controlSize, height: PanelMetrics.controlSize).contentShape(Rectangle())
                     }.buttonStyle(PanelControlStyle(selected: model.isSearchVisible)).focusEffectDisabled().help("搜索 ⌘F")
+                    .accessibilityLabel("搜索")
                     Button { model.performTool(.screenshotOCR) } label: {
                         Label("截图", systemImage: "camera.viewfinder")
-                            .font(.system(size: 12, weight: .medium)).frame(width: 64, height: 32).contentShape(Rectangle())
+                            .font(.system(size: 12, weight: .medium)).frame(width: 64, height: PanelMetrics.controlSize).contentShape(Rectangle())
                     }.buttonStyle(PanelControlStyle()).focusEffectDisabled().help("截图识别")
                     if model.isSearchVisible {
                         PanelInputField(placeholder: "搜索或描述要找的内容", text: $model.queryString, focused: $searchFocused,
                                         onSubmit: model.submitHistorySearch,
                                         onCancel: { model.isSearchVisible = false; model.queryString = ""; searchFocused = false })
-                            .padding(.horizontal, 9).frame(width: searchWidth, height: 32)
+                            .padding(.horizontal, 9).frame(width: searchWidth, height: PanelMetrics.controlSize)
                             .modifier(PasteboardInputSurface(focused: searchFocused))
                             .onAppear { searchFocused = true }
                         filterMenu
@@ -143,7 +151,7 @@ struct PastePanelView: View {
                                                                      set: { boardNameFocused = $0 ? board.id : nil }),
                                                     onSubmit: { finishRename(board.id) },
                                                     onCancel: { renamingBoard = nil; boardNameFocused = nil })
-                                        .padding(.horizontal, 9).frame(width: 115, height: 32)
+                                        .padding(.horizontal, 9).frame(width: 115, height: PanelMetrics.controlSize)
                                         .modifier(PasteboardInputSurface(focused: boardNameFocused == board.id))
                                 } else {
                                     boardPill(board.name, id: board.id, color: Color(hex: board.colorHex))
@@ -152,7 +160,7 @@ struct PastePanelView: View {
                                             Button("自动归类设置…") { classificationBoard = board }
                                             Button("向左移动") { model.movePinboard(board.id, delta: -1) }
                                             Button("向右移动") { model.movePinboard(board.id, delta: 1) }
-                                            Button("删除收藏夹", role: .destructive) { model.deletePinboard(board.id) }
+                                            Button("删除收藏夹…", role: .destructive) { pendingBoardDeletion = board }
                                         }
                                         .dropDestination(for: String.self) { values, _ in
                                             model.selectedIDs = Set(values.compactMap(UUID.init(uuidString:)))
@@ -162,15 +170,16 @@ struct PastePanelView: View {
                                 }
                             }
                         }
-                    }.scrollIndicators(.never).frame(width: boardWidth, height: 32)
+                    }.scrollIndicators(.never).frame(width: boardWidth, height: PanelMetrics.controlSize)
                     Button(action: createBoard) {
-                        Image(systemName: "plus").frame(width: 32, height: 32).contentShape(Rectangle())
+                        Image(systemName: "plus").frame(width: PanelMetrics.controlSize, height: PanelMetrics.controlSize).contentShape(Rectangle())
                     }.buttonStyle(PanelControlStyle()).focusEffectDisabled().help("新建收藏夹")
-                }.frame(width: min(available, controlsWidth + boardWidth), height: 32)
+                    .accessibilityLabel("新建收藏夹")
+                }.frame(width: min(available, controlsWidth + boardWidth), height: PanelMetrics.toolbarHeight)
                     .frame(maxWidth: .infinity)
-                appMenu.padding(.trailing, 22)
+                appMenu.padding(.trailing, PanelMetrics.toolbarTrailingPadding)
             }
-        }.frame(height: 32)
+        }.frame(height: PanelMetrics.toolbarHeight)
     }
 
     private func createBoard() {
@@ -215,7 +224,7 @@ struct PastePanelView: View {
                     .lineLimit(1).truncationMode(.tail)
             }
             .foregroundStyle(selected ? PanelPalette.selectionText : PanelPalette.text)
-            .padding(.horizontal, 13).frame(height: 32).frame(maxWidth: 160)
+            .padding(.horizontal, 13).frame(height: PanelMetrics.controlSize).frame(maxWidth: 160)
             .background(selected ? PanelPalette.selection : PanelPalette.raised, in: Capsule())
             .overlay(Capsule().strokeBorder(selected ? PanelPalette.border : PanelPalette.border.opacity(0.45), lineWidth: 0.75))
             .contentShape(Capsule())
@@ -247,11 +256,14 @@ struct PastePanelView: View {
                 Button("最近 30 天") { model.filter.since = Date().addingTimeInterval(-30 * 86400) }
             }
             Divider()
-            Button("清除筛选") { model.filter = ClipFilter(); model.queryString = "" }
+            Button("清除筛选", action: clearFilters)
         } label: {
             Image(systemName: "line.3.horizontal.decrease.circle")
-                .foregroundStyle(model.filter.kind != nil || model.filter.sourceBundleID != nil || model.filter.since != nil ? PanelPalette.accent : PanelPalette.secondaryText)
-        }.menuStyle(.borderlessButton).menuIndicator(.hidden).focusEffectDisabled().frame(width: 32, height: 32)
+                .foregroundStyle(hasActiveFilter ? PanelPalette.accent : PanelPalette.secondaryText)
+        }.menuStyle(.borderlessButton).menuIndicator(.hidden).focusEffectDisabled().frame(width: PanelMetrics.controlSize, height: PanelMetrics.controlSize)
+        .help("筛选")
+        .accessibilityLabel("筛选")
+        .accessibilityValue(hasActiveFilter ? "已启用筛选" : "")
     }
 
     private var sources: [ClipItem] {
@@ -284,8 +296,10 @@ struct PastePanelView: View {
             Button("导入备份…", action: model.importBackup)
             Divider()
             Button("设置…", action: model.openSettings)
-        } label: { Image(systemName: "ellipsis").font(.system(size: 19, weight: .bold)).frame(width: 32, height: 32).contentShape(Rectangle()) }
-        .menuStyle(.borderlessButton).menuIndicator(.hidden).focusEffectDisabled().frame(width: 32, height: 32)
+        } label: { Image(systemName: "ellipsis").font(.system(size: 19, weight: .bold)).frame(width: PanelMetrics.controlSize, height: PanelMetrics.controlSize).contentShape(Rectangle()) }
+        .menuStyle(.borderlessButton).menuIndicator(.hidden).focusEffectDisabled().frame(width: PanelMetrics.controlSize, height: PanelMetrics.controlSize)
+        .help("更多操作")
+        .accessibilityLabel("更多操作")
     }
 
     @ViewBuilder private func cardMenu(_ item: ClipItem) -> some View {
@@ -325,6 +339,24 @@ struct PastePanelView: View {
         Button("删除", role: .destructive) { ensureSelection(item); model.deleteSelected() }
     }
 
+    private func selectOnClick(_ item: ClipItem) {
+        let flags = NSEvent.modifierFlags
+        let extend = flags.contains(.command) || flags.contains(.shift)
+        // The AI suggestion bar describes the current multi-selection, and `activate` keeps it intact.
+        // A plain click on one of its cards (including the first click of a double-click) must not collapse it.
+        if !extend, model.contextSuggestionsPresented, model.selectedIDs.count > 1, model.selectedIDs.contains(item.id) { return }
+        model.select(item, extend: extend)
+    }
+
+    private func clearFilters() {
+        model.filter = ClipFilter()
+        model.queryString = ""
+    }
+
+    private var hasActiveFilter: Bool {
+        model.filter.kind != nil || model.filter.sourceBundleID != nil || model.filter.since != nil
+    }
+
     private func ensureSelection(_ item: ClipItem) {
         if !model.selectedIDs.contains(item.id) { model.select(item) }
     }
@@ -333,9 +365,13 @@ struct PastePanelView: View {
         let filtering = !model.queryString.isEmpty || model.filter != ClipFilter()
         let inPinboard = model.selectedPinboardID != nil
         return VStack(spacing: 10) {
-            Image(systemName: model.queryString.isEmpty ? "clipboard" : "magnifyingglass").font(.system(size: 35, weight: .light)).foregroundStyle(.secondary)
+            Image(systemName: filtering ? "magnifyingglass" : (inPinboard ? "folder" : "clipboard")).font(.system(size: 35, weight: .light)).foregroundStyle(.secondary)
             Text(filtering ? "未找到匹配卡片" : (inPinboard ? "收藏夹为空" : "暂无剪贴板记录")).font(.headline)
             Text(filtering ? "更换关键词或清除筛选。" : (inPinboard ? "将卡片拖入此收藏夹。" : "复制的内容会显示在这里。")) .font(.subheadline).foregroundStyle(.secondary)
+            if filtering {
+                Button("清除筛选", action: clearFilters)
+                    .buttonStyle(.bordered).controlSize(.small).padding(.top, 4)
+            }
         }
     }
 }
@@ -345,10 +381,11 @@ struct ClipCard: View {
     let selected: Bool
     let index: Int
     var categories: [Pinboard] = []
+    @State private var hovered = false
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
-                SourceIcon(item: item).frame(width: 24, height: 24)
+                SourceIcon(item: item, selected: selected).frame(width: 24, height: 24)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(item.sourceName.isEmpty ? "剪贴板" : item.sourceName)
                         .font(.system(size: 12, weight: .medium)).lineLimit(1)
@@ -359,7 +396,7 @@ struct ClipCard: View {
                     Text(relativeTime(now: context.date)).font(.system(size: 10))
                         .foregroundStyle(selected ? PanelPalette.selectionSecondaryText : PanelPalette.secondaryText).lineLimit(1)
                 }
-            }.padding(.horizontal, 12).frame(height: 48).background(selected ? PanelPalette.selection : PanelPalette.raised)
+            }.padding(.horizontal, 12).frame(height: PanelMetrics.cardHeaderHeight).background(selected ? PanelPalette.selection : (hovered ? PanelPalette.hover : PanelPalette.raised))
             VStack(alignment: .leading, spacing: 8) {
                 if item.kind == .image {
                     CardThumbnail(item: item)
@@ -387,39 +424,64 @@ struct ClipCard: View {
                     Spacer()
                     if index < 9 { Text("⌘\(index + 1)") }
                 }.font(.system(size: 10)).foregroundStyle(selected ? PanelPalette.selectionSecondaryText : PanelPalette.secondaryText)
-            }.padding(16).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }.padding(PanelMetrics.cardContentPadding).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .background(selected ? PanelPalette.selection : PanelPalette.surface)
-        }.frame(width: 230, height: 232).foregroundStyle(selected ? PanelPalette.selectionText : PanelPalette.text)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(selected ? PanelPalette.selectionBorder : PanelPalette.border.opacity(0.45), lineWidth: selected ? 2 : 0.75))
+        }.frame(width: PanelMetrics.cardWidth, height: PanelMetrics.cardHeight).foregroundStyle(selected ? PanelPalette.selectionText : PanelPalette.text)
+            .clipShape(RoundedRectangle(cornerRadius: PanelMetrics.cardCornerRadius))
+            .overlay(RoundedRectangle(cornerRadius: PanelMetrics.cardCornerRadius).strokeBorder(selected ? PanelPalette.selectionBorder : PanelPalette.border.opacity(hovered ? 0.9 : 0.45),
+                                                                        lineWidth: selected ? 2 : (hovered ? 1 : 0.75)))
             .shadow(color: .black.opacity(0.18), radius: 6, y: 3)
+            .onHover { hovered = $0 }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(item.kind.displayName)，\(item.sourceName)，\(item.title)")
+            .accessibilityLabel(item.accessibilitySummary)
             .accessibilityAddTraits(.isButton)
             .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     private func relativeTime(now: Date) -> String {
         if now.timeIntervalSince(item.lastCopiedAt) < 60 { return "刚刚" }
+        return Self.relativeFormatter.localizedString(for: item.lastCopiedAt, relativeTo: now)
+    }
+
+    /// Shared by every card; creating a formatter per card on each minute tick is wasteful.
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
         formatter.locale = Locale(identifier: "zh_CN")
         formatter.unitsStyle = .short
-        return formatter.localizedString(for: item.lastCopiedAt, relativeTo: now)
-    }
+        return formatter
+    }()
 }
 
 struct SourceIcon: View {
     let item: ClipItem
+    var selected = false
     var body: some View {
         if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: item.sourceBundleID) {
             Image(nsImage: NSWorkspace.shared.icon(forFile: url.path)).resizable().scaledToFit()
         } else {
-            Image(systemName: item.kind.symbolName).resizable().scaledToFit().padding(7).foregroundStyle(.white.opacity(0.9))
+            Image(systemName: item.kind.symbolName).resizable().scaledToFit().padding(7)
+                .foregroundStyle(selected ? PanelPalette.selectionSecondaryText : PanelPalette.secondaryText)
         }
     }
 }
 
 extension ClipItem {
+    /// VoiceOver summary for a card: kind, source, then a short preview. Empty parts are skipped
+    /// so the label never reads as stray separators.
+    var accessibilitySummary: String {
+        let preview: String
+        if !title.isEmpty {
+            preview = title
+        } else if kind == .file {
+            preview = filePaths.first.map { ($0 as NSString).lastPathComponent } ?? ""
+        } else {
+            let source = kind == .image ? (enrichment?.ocr?.text ?? "") : text
+            preview = String(source.split(whereSeparator: \.isNewline).joined(separator: " ")
+                .trimmingCharacters(in: .whitespaces).prefix(40))
+        }
+        return [kind.displayName, sourceName, preview].filter { !$0.isEmpty }.joined(separator: "，")
+    }
+
     var previewImage: NSImage? {
         for representation in representations where representation.type.contains("image") || representation.type.contains("png") || representation.type.contains("tiff") || representation.type.contains("jpeg") {
             if let image = NSImage(data: representation.data) { return image }
