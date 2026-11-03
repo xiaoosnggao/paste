@@ -43,6 +43,8 @@ enum ContextSuggestionModelChecks {
             if configured { model.toolConfiguration.aiServices = [service]; model.toolConfiguration.translationAIServiceID = service.id }
             model.suggestionSessionActive = true
             model.select(source)
+            // Suggestions are fetched only while the preview window shows a card.
+            model.preview(source)
             models.append(model)
             return model
         }
@@ -291,12 +293,17 @@ enum ContextSuggestionModelChecks {
                   "loading-to-results transition briefly collapsed the suggestions region")
         presentationChanges.removeAll()
         expansion.select(other)
+        try check(!expansion.ruleSuggestions.isEmpty && expansion.displayedSuggestions.first?.origin == .rule,
+                  "local rule suggestions were not shown instantly while AI loads")
+        try check(expansion.suggestionStripAvailable && expansion.suggestionAdditionalHeight == 0,
+                  "preview suggestions were unavailable or resized the panel")
         try check(expansion.contextSuggestionsLoading && expansion.contextSuggestionsPresented,
                   "selecting another card collapsed the existing region instead of showing loading")
         try await eventually { !expansion.contextSuggestionsLoading && expansion.contextSuggestions.first?.title == other.text }
         try check(!presentationChanges.contains(false),
                   "card-switch loading transition briefly collapsed the suggestions region")
         expansion.dismissContextSuggestions()
+        try check(expansion.suggestionStripShowsHint, "dismissed suggestions left no way back in the preview window")
         try check(!expansion.contextSuggestionsPresented && presentationChanges.last == false,
                   "dismissing suggestions failed to remove the presented region")
 
@@ -372,6 +379,58 @@ enum ContextSuggestionModelChecks {
         await staleCalls.release()
         try await settle()
         try check(stale.snapshot.items.count == 2, "late transformation for previous selection created a result")
+        // Suggestions live only in the preview window; ⌘J opens it.
+        let pageCalls = ContextSuggestionRecorder()
+        let paged = make(pageCalls)
+        try await eventually { paged.contextSuggestionsVisible }
+        paged.previewWindowClosed()
+        try check(paged.contextSuggestionKey == nil && paged.displayedSuggestions.isEmpty, "closing preview kept suggestions")
+        let before = await pageCalls.inputs.count
+        paged.select(other)
+        try await settle()
+        try check(await pageCalls.inputs.count == before && paged.contextSuggestionKey == nil,
+                  "selecting a card in the panel requested suggestions")
+        paged.openPanelDetailForSelection(.suggestions)
+        try check(paged.previewItemID == other.id && paged.panelDetail == nil, "⌘J did not open the preview window")
+        try check(paged.contextSuggestionKey != nil && !paged.ruleSuggestions.isEmpty, "preview did not show suggestions at once")
+        try check(PanelPresentation.visibleFrame(on: NSRect(x: 0, y: 0, width: 1440, height: 900), suggestionsVisible: false)
+                  == PanelPresentation.visibleFrame(on: NSRect(x: 0, y: 0, width: 1440, height: 900)), "panel reserved a suggestion slot")
+        paged.selectedIDs = [source.id, other.id]
+        try await settle()
+        try check(paged.contextSuggestionKey?.cards.count == 2, "multi-select in preview did not request the summary")
+
+        // Background precompute follows the settings toggle.
+        let preCalls = ContextSuggestionRecorder()
+        let pre = make(preCalls)
+        pre.suggestionPrecomputeDelayNanoseconds = 0
+        var preConfig = pre.toolConfiguration
+        preConfig.backgroundSuggestionPrecompute = false
+        pre.toolConfiguration = preConfig
+        try await settle()
+        let copied = ClipItem(text: "Precompute candidate text", kind: .text, sourceBundleID: "test.source", sourceName: "Fixture")
+        pre.scheduleSuggestionPrecompute(for: copied)
+        try check(pre.suggestionPrecomputeTask == nil, "precompute ran with the toggle off")
+        preConfig.backgroundSuggestionPrecompute = true
+        pre.toolConfiguration = preConfig
+        pre.scheduleSuggestionPrecompute(for: copied)
+        try check(pre.suggestionPrecomputeTask != nil, "precompute did not start with the toggle on")
+        pre.suggestionPrecomputeTask?.cancel()
+        try check(!SuggestionPrecompute.eligible(ClipItem(text: "password: hunter2", kind: .text)),
+                  "sensitive-looking text was eligible for precompute")
+
+        // The disk cache keys on content, target and service, and survives a reload.
+        let cacheDir = root.appendingPathComponent("suggestion-cache", isDirectory: true)
+        try FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+        let ai = ContextSuggestion(id: "c1", title: "翻译", instruction: "Translate to Chinese.", detail: "翻译成中文", origin: .ai)
+        let disk = SuggestionDiskCache(directory: cacheDir)
+        disk.store([ai], text: "hello", targetBundleID: "com.a", service: service)
+        try check(SuggestionDiskCache.key(text: "hello", targetBundleID: "com.a", service: service)
+                  != SuggestionDiskCache.key(text: "hello", targetBundleID: "com.b", service: service)
+                  && SuggestionDiskCache.key(text: "hello", targetBundleID: "com.a", service: service)
+                  != SuggestionDiskCache.key(text: "hello!", targetBundleID: "com.a", service: service), "cache key ignored content or target")
+        try check(SuggestionDiskCache(directory: cacheDir).lookup(text: "hello", targetBundleID: "com.a", service: service)?.first?.title == "翻译",
+                  "disk cache did not persist")
+        try check(disk.lookup(text: "other", targetBundleID: "com.a", service: service) == nil, "cache hit for different content")
         return count
     }
 

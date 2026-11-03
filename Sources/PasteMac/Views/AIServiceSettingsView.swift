@@ -19,6 +19,10 @@ struct AIServiceSettingsView: View {
                 Toggle("选中卡片时生成建议", isOn: $model.toolConfiguration.contextSuggestionsEnabled)
                 Text("将所选文本、来源应用和粘贴目标发送至当前 AI 翻译服务；未指定时使用列表中首个已启用的文本服务。")
                     .font(.caption).foregroundStyle(.secondary)
+                Toggle("复制后提前准备建议", isOn: $model.toolConfiguration.backgroundSuggestionPrecompute)
+                    .disabled(!model.toolConfiguration.contextSuggestionsEnabled)
+                Text("开启后，复制的文字会在空闲时发送到云端模型预先生成建议，打开面板即可看到。图片、文件、超长内容、疑似密码，以及已忽略的应用和隐私内容不会发送。")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section("AI 服务") {
                 if model.toolConfiguration.aiServices.isEmpty {

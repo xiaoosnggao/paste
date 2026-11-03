@@ -90,6 +90,8 @@ extension AppModel {
                 else { translateItem(item) }
             }
         case .intelligence: intelligence(item)
+        // ⌘J: the preview window carries the suggestions; it keeps a multi-selection for its summary.
+        case .suggestions: if previewItemID == nil { preview(item) }
         }
     }
 

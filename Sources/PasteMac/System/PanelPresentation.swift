@@ -3,8 +3,9 @@ import SwiftUI
 
 enum PanelPresentation {
     static let baseHeight: CGFloat = 320
-    static let suggestionContentHeight: CGFloat = 132
-    static let suggestionSpacing: CGFloat = 12
+    /// The suggestion strip under the toolbar. One row of chips; descriptions live on the 建议 page.
+    static let suggestionContentHeight: CGFloat = 34
+    static let suggestionSpacing: CGFloat = 6
     static let suggestionExpansionHeight = suggestionContentHeight + suggestionSpacing
 
     /// The panel's frame. An open detail layer replaces the suggestions bar, so

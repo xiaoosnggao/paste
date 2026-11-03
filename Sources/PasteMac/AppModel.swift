@@ -17,7 +17,8 @@ final class AppModel: ObservableObject {
     @Published var panelDetail: PanelDetailState? { didSet { if panelDetail != oldValue { panelDetailChanged(from: oldValue) } } }
     /// The detail card height for the panel's current screen.
     /// The card the preview window shows; nil while it is closed.
-    @Published var previewItemID: UUID?
+    /// Suggestions are requested only while the preview window is open.
+    @Published var previewItemID: UUID? { didSet { if previewItemID != oldValue { scheduleContextSuggestions() } } }
     @Published var panelDetailContentHeight = PanelDetailLayout.contentHeight
     var onPanelDetailChange: (() -> Void)?
     /// Unsaved editor text per card (nil key: a new text). Kept while the panel hides.
@@ -65,6 +66,14 @@ final class AppModel: ObservableObject {
     var onSuggestionPreview: ((ContextSuggestionPreviewResult) -> Void)?
     var multiCardSummaryCache: [(ContextSuggestionRequestKey, MultiCardContextSummary)] = []
     @Published var contextSuggestions: [ContextSuggestion] = []
+    /// Instant local suggestions shown until (or instead of) the AI reply.
+    @Published var ruleSuggestions: [ContextSuggestion] = []
+    /// AI suggestions that have streamed in so far for the pending request.
+    @Published var partialContextSuggestions: [ContextSuggestion] = []
+    lazy var suggestionDiskCache = SuggestionDiskCache(directory: isDemo ? nil : storageDirectory)
+    var suggestionPrecomputeTask: Task<Void, Never>?
+    var suggestionPrecomputeInFlight: (key: String, task: Task<[ContextSuggestion]?, Never>)?
+    var suggestionPrecomputeDelayNanoseconds: UInt64 = 2_000_000_000
     @Published var contextSuggestionsLoading = false {
         didSet {
             if contextSuggestionsLoading != oldValue { onSuggestionPanelChange?(contextSuggestionsPresented) }
@@ -160,7 +169,7 @@ final class AppModel: ObservableObject {
     var onShortcut: ((UInt32, UInt32) -> Bool)?
     var onStackShortcut: ((UInt32, UInt32) -> Bool)?
 
-    init(isDemo: Bool = false, storageDirectory: URL? = nil, bridge: ClipboardBridge? = nil, toolOperations: ToolOperations? = nil, toolDefaults: UserDefaults = .standard, pasteEngine: PasteEngine? = nil, autoTranslationDelayNanoseconds: UInt64 = 750_000_000, suggestionOperations: ContextSuggestionOperations? = nil, suggestionDelayNanoseconds: UInt64 = 250_000_000) {
+    init(isDemo: Bool = false, storageDirectory: URL? = nil, bridge: ClipboardBridge? = nil, toolOperations: ToolOperations? = nil, toolDefaults: UserDefaults = .standard, pasteEngine: PasteEngine? = nil, autoTranslationDelayNanoseconds: UInt64 = 750_000_000, suggestionOperations: ContextSuggestionOperations? = nil, suggestionDelayNanoseconds: UInt64 = 120_000_000) {
         self.suggestionOperations = suggestionOperations ?? .live()
         self.suggestionOperationsInjected = suggestionOperations != nil
         self.suggestionDelayNanoseconds = suggestionDelayNanoseconds
@@ -261,6 +270,7 @@ final class AppModel: ObservableObject {
             try validateCurrentWindow(captured)
             snapshot = captured
             persist()
+            if let latest = captured.items.first(where: { $0.fingerprint == item.fingerprint }) { scheduleSuggestionPrecompute(for: latest) }
             if snapshot.preferences.soundEnabled { NSSound(named: "Pop")?.play() }
         } catch { statusMessage = error.localizedDescription }
     }

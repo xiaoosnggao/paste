@@ -64,6 +64,8 @@ struct CloudToolConfiguration: Codable, Equatable, Sendable {
     var openAITranslationModel = "gpt-4o-mini"
     var microsoftRegion = ""
     var contextSuggestionsEnabled = true
+    /// Prepares suggestions in the background right after a copy, so the panel opens with them ready.
+    var backgroundSuggestionPrecompute = true
     var aiServices: [AIServiceConfig] = []
     var translationAIServiceID: UUID? = nil
     var ocrAIServiceID: UUID? = nil
@@ -128,7 +130,7 @@ struct CloudToolConfiguration: Codable, Equatable, Sendable {
         case ocrProvider, translationProvider, ocrMode, zhipuModel, targetLanguage, sourceLanguage
         case tencentRegion, tencentAction, baiduOCRMode, openAIOCREndpoint, openAIOCRModel
         case openAITranslationEndpoint, openAITranslationModel, microsoftRegion
-        case aiServices, translationAIServiceID, ocrAIServiceID, contextSuggestionsEnabled
+        case aiServices, translationAIServiceID, ocrAIServiceID, contextSuggestionsEnabled, backgroundSuggestionPrecompute
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -149,6 +151,7 @@ struct CloudToolConfiguration: Codable, Equatable, Sendable {
         openAITranslationModel = try c.decodeIfPresent(String.self, forKey: .openAITranslationModel) ?? openAITranslationModel
         microsoftRegion = try c.decodeIfPresent(String.self, forKey: .microsoftRegion) ?? microsoftRegion
         contextSuggestionsEnabled = try c.decodeIfPresent(Bool.self, forKey: .contextSuggestionsEnabled) ?? true
+        backgroundSuggestionPrecompute = try c.decodeIfPresent(Bool.self, forKey: .backgroundSuggestionPrecompute) ?? true
         aiServices = try c.decodeIfPresent([AIServiceConfig].self, forKey: .aiServices) ?? []
         translationAIServiceID = try c.decodeIfPresent(UUID.self, forKey: .translationAIServiceID)
         ocrAIServiceID = try c.decodeIfPresent(UUID.self, forKey: .ocrAIServiceID)

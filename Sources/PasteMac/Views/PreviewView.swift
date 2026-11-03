@@ -36,10 +36,16 @@ struct PreviewView: View {
                     HStack(alignment: .top, spacing: DesignTokens.Space.lg) {
                         mainContent(value).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                         // Results only; the actions that create them live in the ⋯ menu.
-                        if value.enrichment?.ocr != nil || value.enrichment?.translation != nil {
-                            ScrollView { ClipEnrichmentView(model: model, item: value).controlSize(.small) }
-                                .scrollIndicators(.automatic)
-                                .frame(width: 300)
+                        let enriched = value.enrichment?.ocr != nil || value.enrichment?.translation != nil
+                        if enriched || model.suggestionStripAvailable {
+                            ScrollView {
+                                VStack(alignment: .leading, spacing: DesignTokens.Space.lg) {
+                                    if model.suggestionStripAvailable { PreviewSuggestionsSection(model: model) }
+                                    if enriched { ClipEnrichmentView(model: model, item: value).controlSize(.small) }
+                                }
+                            }
+                            .scrollIndicators(.automatic)
+                            .frame(width: 300)
                         }
                     }
                 } footer: {
