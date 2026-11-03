@@ -80,6 +80,29 @@ enum ContextSuggestionModelChecks {
         try await eventually { !context.contextSuggestions.isEmpty }
         try check(await contextCalls.inputs.count == 3, "explicit retry did not refresh the provider result")
 
+        // The detail layer and the suggestions bar share one region and never show together.
+        let detailCalls = ContextSuggestionRecorder()
+        let detailed = make(detailCalls)
+        try await eventually { detailed.contextSuggestionsVisible }
+        detailed.openPanelDetail(.preview, itemID: source.id)
+        try check(!detailed.contextSuggestionsPresented && detailed.contextSuggestionKey == nil,
+                  "opening detail left the suggestions bar presented")
+        try check(detailed.activeHistoryReferences["detail"] == [source.id], "detail did not retain its card's payload")
+        detailed.select(other)
+        try await settle()
+        try check(detailed.panelDetail?.itemID == other.id, "preview did not follow the selected card")
+        try check(await detailCalls.inputs.count == 1 && !detailed.contextSuggestionsPresented,
+                  "moving the selection under detail requested suggestions")
+        detailed.selectedIDs = [source.id, other.id]
+        try check(detailed.panelDetail?.itemID == other.id, "multi-selection changed the previewed card")
+        detailed.select(other)
+        detailed.closePanelDetail()
+        try check(detailed.activeHistoryReferences["detail"] == nil, "closing detail kept its payload reference")
+        try await eventually { detailed.contextSuggestionsVisible && detailed.contextSuggestions.first?.title == other.text }
+        detailed.openPanelDetail(.preview, itemID: source.id)
+        detailed.panelDidHide()
+        try check(detailed.panelDetail == nil, "hiding the panel kept the preview open")
+
         let latestCalls = ContextSuggestionRecorder(blockSuggestion: true)
         let latest = make(latestCalls)
         try await eventually { await latestCalls.inputs.count == 1 }

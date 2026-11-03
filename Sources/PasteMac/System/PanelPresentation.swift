@@ -7,9 +7,15 @@ enum PanelPresentation {
     static let suggestionSpacing: CGFloat = 12
     static let suggestionExpansionHeight = suggestionContentHeight + suggestionSpacing
 
-    static func visibleFrame(on screen: NSRect, suggestionsVisible: Bool = false, additionalHeight: CGFloat = 0) -> NSRect {
-        NSRect(x: screen.minX + 8, y: screen.minY + 8,
-               width: max(1, screen.width - 16), height: min(baseHeight + (suggestionsVisible ? suggestionExpansionHeight + additionalHeight : 0), max(1, screen.height - 16)))
+    /// The panel's frame. An open detail layer replaces the suggestions bar, so
+    /// their heights never add up; the result always fits the monitor.
+    static func visibleFrame(on screen: NSRect, suggestionsVisible: Bool = false, additionalHeight: CGFloat = 0,
+                             detailContentHeight: CGFloat? = nil) -> NSRect {
+        let expansion: CGFloat
+        if let detailContentHeight { expansion = detailContentHeight + PanelDetailLayout.spacing }
+        else { expansion = suggestionsVisible ? suggestionExpansionHeight + additionalHeight : 0 }
+        return NSRect(x: screen.minX + 8, y: screen.minY + 8,
+                      width: max(1, screen.width - 16), height: min(baseHeight + expansion, max(1, screen.height - 16)))
     }
 
     static func hiddenContentFrame(size: NSSize) -> NSRect {
