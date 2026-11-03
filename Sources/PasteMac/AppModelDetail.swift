@@ -36,7 +36,12 @@ extension AppModel {
         case .preview: preview(item)
         case .edit: edit(item)
         case .translate:
-            if item.kind == .image { recognizeItem(item, translateAfter: true) } else { translateItem(item) }
+            // A card that already has a translation shows it without sending the text again.
+            hostToolsInPanel {
+                if item.enrichment?.translation != nil { showToolItem(item) }
+                else if item.kind == .image { recognizeItem(item, translateAfter: true) }
+                else { translateItem(item) }
+            }
         case .intelligence: intelligence(item)
         }
     }
@@ -49,8 +54,64 @@ extension AppModel {
     }
 
     /// The panel hid, for example after an outside click or a paste.
+    /// An editor with unsaved changes stays open, so reopening the panel returns to it.
     func panelDidHide() {
+        if let detail = panelDetail, detail.page == .edit, panelEditorDrafts[detail.itemID]?.isDirty == true { return }
         closePanelDetail()
+    }
+
+    // MARK: Editor page
+
+    /// Opens the editor page, resuming an unsaved draft for the same card.
+    func openPanelEditor(_ item: ClipItem?) {
+        if panelEditorDrafts[item?.id] == nil { panelEditorDrafts[item?.id] = PanelEditorDraft(item: item) }
+        openPanelDetail(.edit, itemID: item?.id)
+    }
+
+    var panelEditorDraft: PanelEditorDraft? {
+        guard let detail = panelDetail, detail.page == .edit else { return nil }
+        return panelEditorDrafts[detail.itemID]
+    }
+
+    func updatePanelEditorDraft(value: NSAttributedString, title: String) {
+        guard let detail = panelDetail, detail.page == .edit, var draft = panelEditorDrafts[detail.itemID] else { return }
+        draft.value = value; draft.title = title
+        panelEditorDrafts[detail.itemID] = draft
+    }
+
+    /// ⌘S and the Save button. Saving is unchanged: the same rich text save as the editor window.
+    @discardableResult
+    func savePanelEditor() -> Bool {
+        guard let detail = panelDetail, detail.page == .edit, let draft = panelEditorDrafts[detail.itemID],
+              !draft.value.string.isEmpty else { return false }
+        guard saveRichText(draft.value, title: draft.title, item: draft.item) else { return false }
+        panelEditorDrafts[detail.itemID] = nil
+        closePanelDetail()
+        return true
+    }
+
+    /// Cancel throws the draft away.
+    func cancelPanelEditor() {
+        guard let detail = panelDetail, detail.page == .edit else { return }
+        panelEditorDrafts[detail.itemID] = nil
+        closePanelDetail()
+    }
+
+    // MARK: Translate page
+
+    /// Runs a tool action started from the panel so its result shows on the translate page.
+    func hostToolsInPanel(_ body: () -> Void) {
+        toolsHostedInPanel = true
+        defer { toolsHostedInPanel = false }
+        body()
+    }
+
+    /// Ends a translation hosted in the panel, as closing the tool window did.
+    func endPanelTool() {
+        toolsHostedInPanel = false
+        guard toolSessionActive else { return }
+        toolSessionActive = false
+        cancelToolOperation()
     }
 
     func panelDetailChanged(from old: PanelDetailState?) {
@@ -58,6 +119,11 @@ extension AppModel {
             // Keep the full payload loaded while the layer shows it, like the old windows did.
             if let id = panelDetail?.itemID { retainHistory([id], for: "detail") }
             else { releaseHistory(for: "detail") }
+        }
+        if old?.page == .translate && panelDetail?.page != .translate { endPanelTool() }
+        // An unchanged draft is not worth keeping once the editor closes.
+        if let old, old.page == .edit, panelDetail != old, panelEditorDrafts[old.itemID]?.isDirty != true {
+            panelEditorDrafts[old.itemID] = nil
         }
         // Opening the layer hides the suggestions bar; closing it brings the bar back.
         if (panelDetail == nil) != (old == nil) { scheduleContextSuggestions() }

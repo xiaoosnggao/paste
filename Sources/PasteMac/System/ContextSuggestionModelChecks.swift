@@ -103,6 +103,45 @@ enum ContextSuggestionModelChecks {
         detailed.panelDidHide()
         try check(detailed.panelDetail == nil, "hiding the panel kept the preview open")
 
+        // Edit page: the draft survives Esc and hiding; Cancel drops it; ⌘S saves through the same save.
+        detailed.openPanelEditor(source)
+        try check(detailed.panelDetail == PanelDetailState(itemID: source.id, page: .edit), "edit did not open the edit page")
+        try check(detailed.panelEditorDraft?.value.string == source.text, "the edit page did not start from the card's text")
+        detailed.updatePanelEditorDraft(value: NSAttributedString(string: "draft text"), title: "draft title")
+        detailed.closePanelDetail()
+        try check(detailed.panelEditorDrafts[source.id]?.value.string == "draft text", "second Esc discarded the draft")
+        detailed.openPanelEditor(source)
+        try check(detailed.panelEditorDraft?.title == "draft title", "reopening the editor did not resume the draft")
+        detailed.panelDidHide()
+        try check(detailed.panelDetail?.page == .edit, "hiding the panel closed an editor with unsaved changes")
+        try check(!detailed.contextSuggestionsPresented, "suggestions showed beside a kept editor")
+        detailed.cancelPanelEditor()
+        try check(detailed.panelDetail == nil && detailed.panelEditorDrafts[source.id] == nil, "Cancel kept the draft")
+        detailed.openPanelEditor(source)
+        detailed.panelDidHide()
+        try check(detailed.panelDetail == nil && detailed.panelEditorDrafts.isEmpty, "an unchanged editor outlived the panel")
+        detailed.openPanelEditor(source)
+        detailed.updatePanelEditorDraft(value: NSAttributedString(string: ""), title: "")
+        try check(!detailed.savePanelEditor() && detailed.panelDetail?.page == .edit, "⌘S saved an empty text")
+        detailed.updatePanelEditorDraft(value: NSAttributedString(string: "saved with command S"), title: "")
+        try check(detailed.savePanelEditor(), "⌘S did not save the draft")
+        try check(detailed.panelDetail == nil && detailed.panelEditorDrafts.isEmpty, "saving left the editor or its draft")
+        try check(detailed.snapshot.items.contains { $0.id == source.id && $0.text == "saved with command S" },
+                  "saving did not update the edited card")
+        detailed.openPanelEditor(nil)
+        try check(detailed.panelDetail == PanelDetailState(itemID: nil, page: .edit), "new text did not open an empty editor")
+        detailed.cancelPanelEditor()
+
+        // Translate page: leaving it ends the tool session, as closing the tool window did.
+        detailed.toolSessionActive = true
+        detailed.openPanelDetail(.translate, itemID: other.id)
+        detailed.openPanelDetail(.preview, itemID: other.id)
+        try check(!detailed.toolSessionActive && !detailed.toolsHostedInPanel, "leaving the translate page kept the tool session")
+        detailed.toolSessionActive = true
+        detailed.openPanelDetail(.translate, itemID: other.id)
+        detailed.panelDidHide()
+        try check(!detailed.toolSessionActive && detailed.panelDetail == nil, "hiding the panel kept the translate session")
+
         let latestCalls = ContextSuggestionRecorder(blockSuggestion: true)
         let latest = make(latestCalls)
         try await eventually { await latestCalls.inputs.count == 1 }

@@ -364,11 +364,11 @@ struct PastePanelView: View {
         Divider()
         Button("编辑") { model.edit(item) }.disabled(item.kind == .image || item.kind == .file)
         Button("预览") { model.preview(item) }
-        if item.enrichment != nil { Button("识别与翻译详情") { model.showToolItem(item) } }
+        if item.enrichment != nil { Button("识别与翻译详情") { hostedTool(item) { model.showToolItem(item) } } }
         if item.kind == .image {
-            Button("识别文字") { model.recognizeItem(item) }
-            Button("识别并翻译") { model.recognizeItem(item, translateAfter: true) }
-        } else if !item.text.isEmpty { Button("翻译") { model.translateItem(item) } }
+            Button("识别文字") { hostedTool(item) { model.recognizeItem(item) } }
+            Button("识别并翻译") { hostedTool(item) { model.recognizeItem(item, translateAfter: true) } }
+        } else if !item.text.isEmpty { Button("翻译") { hostedTool(item) { model.translateItem(item) } } }
         if let ocr = item.enrichment?.ocr { Button("复制识别文字") { model.copyToolText(ocr.text) } }
         if let translation = item.enrichment?.translation { Button("复制译文") { model.copyToolText(translation.translatedText) } }
         if item.kind == .image {
@@ -379,6 +379,12 @@ struct PastePanelView: View {
         Button("添加到连续粘贴") { ensureSelection(item); model.setStack(model.selectedItems); model.showStack() }
         Divider()
         Button("删除", role: .destructive) { ensureSelection(item); model.deleteSelected() }
+    }
+
+    /// Recognition and translation from the menu show on the panel's translate page.
+    private func hostedTool(_ item: ClipItem, _ body: () -> Void) {
+        ensureSelection(item)
+        model.hostToolsInPanel(body)
     }
 
     /// Hover buttons and accessibility actions select the card, then open its page.

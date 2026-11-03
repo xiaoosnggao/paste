@@ -2,8 +2,9 @@ import AppKit
 import SwiftUI
 import PasteCore
 
-/// The detail layer above the deck. It replaces the preview, editor and tool
-/// windows, so the panel stays the one place a card is worked on.
+/// The detail layer above the deck. It replaces the preview, editor, smart and
+/// tool windows when they start from the panel, so the panel stays the one place
+/// a card is worked on. Tools started by a global shortcut still use their window.
 struct PanelDetailView: View {
     @ObservedObject var model: AppModel
     let detail: PanelDetailState
@@ -12,12 +13,13 @@ struct PanelDetailView: View {
     var body: some View {
         Group {
             switch detail.page {
-            case .preview, .edit, .translate, .intelligence:
-                // Only the preview is hosted here so far; other pages still open their windows.
-                PreviewView(model: model, itemID: detail.itemID)
+            case .preview: PreviewView(model: model, itemID: detail.itemID)
+            case .edit: EditorView(model: model, itemID: detail.itemID)
+            case .translate: QuickToolView(model: model, hosted: true)
+            case .intelligence: IntelligenceView(model: model, itemID: detail.itemID)
             }
         }
-        .id(detail.itemID)
+        .id(detail)
         .frame(maxWidth: PanelDetailLayout.maxContentWidth)
         .frame(height: model.panelDetailContentHeight)
         .background(PanelPalette.canvas.opacity(reduceTransparency ? 1 : 0.86), in: RoundedRectangle(cornerRadius: DesignTokens.Radius.xl))
