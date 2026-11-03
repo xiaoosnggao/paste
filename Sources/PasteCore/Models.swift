@@ -49,7 +49,7 @@ public struct ClipEnrichment: Codable, Equatable, Sendable {
     }
 }
 public struct ClipDerivation: Codable, Equatable, Sendable {
-    public enum Operation: String, Codable, Sendable { case ocr, translation, aiTransform }
+    public enum Operation: String, Codable, Sendable { case ocr, translation, aiTransform, merge }
     public var sourceItemID: UUID
     public var additionalSourceItemIDs: [UUID]?
     public var sourceItemIDs: [UUID] { [sourceItemID] + (additionalSourceItemIDs ?? []) }

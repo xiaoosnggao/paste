@@ -321,6 +321,7 @@ enum SystemChecks {
         try check(!dispatched, "paste dispatched without a valid target")
         count += try await PasteDispatchChecks.run()
         count += try await ImagePreviewChecks.run()
+        count += try await AIFeatureChecks.run()
         count += try await SessionStateChecks.run()
         count += try await PersistenceChecks.run()
         count += try await IntelligenceChecks.run()

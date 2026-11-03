@@ -26,6 +26,14 @@ struct PastePanelView: View {
         .background(Color.clear)
         .clipShape(RoundedRectangle(cornerRadius: PanelMetrics.panelCornerRadius))
         .overlay(alignment: .bottomTrailing) { statusNotice }
+        .overlay(alignment: .bottom) {
+            if model.selectedIDs.count > 1 || model.mergeInProgress != nil {
+                MergeSelectionBar(model: model)
+                    .padding(.bottom, PanelMetrics.panelBottomPadding + DesignTokens.Space.sm)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.easeOut(duration: 0.18), value: model.selectedIDs.count > 1 || model.mergeInProgress != nil)
         .onChange(of: model.isSearchVisible) { _, visible in searchFocused = visible }
         .onChange(of: model.queryString) { _, _ in model.selectFirstIfNeeded() }
         .onChange(of: model.filter) { _, _ in model.selectFirstIfNeeded() }
@@ -149,6 +157,10 @@ struct PastePanelView: View {
                         .modifier(PasteboardInputSurface(focused: searchFocused))
                         .onAppear { searchFocused = true }
                         .layoutPriority(1)
+                    if let understanding = model.searchUnderstanding, understanding.isInformative {
+                        SearchUnderstandingHint(understanding: understanding)
+                            .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                    }
                     filterMenu
                 }
                 ViewThatFits(in: .horizontal) {
@@ -167,6 +179,7 @@ struct PastePanelView: View {
             appMenu.padding(.trailing, PanelMetrics.toolbarTrailingPadding)
         }
         .frame(height: PanelMetrics.toolbarHeight)
+        .animation(.easeOut(duration: 0.16), value: model.searchUnderstanding)
     }
 
     private var toolbarControls: some View {
@@ -342,6 +355,10 @@ struct PastePanelView: View {
         Button("粘贴为纯文本") { ensureSelection(item); model.activateSelected(plainText: true) }
         Button("复制") { ensureSelection(item); model.copySelected() }
         Button("添加到连续粘贴") { ensureSelection(item); model.setStack(model.selectedItems); model.showStack() }
+        if model.selectedIDs.count > 1, model.selectedIDs.contains(item.id) {
+            Menu("合成一条（\(model.selectedIDs.count) 项）") { MergeModeMenuItems(model: model) }
+                .disabled(!model.canMergeSelection)
+        }
         Divider()
         Button("预览") { model.preview(item) }
         Button("编辑") { model.edit(item) }.disabled(item.kind == .image || item.kind == .file)

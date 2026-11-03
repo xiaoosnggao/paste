@@ -50,6 +50,7 @@ extension AppModel {
                 self.installHistoryPage(page.0, offset: 0, total: page.1)
                 self.historyHasMore = page.0.count == 50
                 self.historyPageOffset = 0
+                self.searchUnderstanding = SearchUnderstanding(plan: page.2, rawQuery: query)
                 if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     await self.enrichHistorySearch(plan: page.2, filter: page.3, generation: generation)
                 }
