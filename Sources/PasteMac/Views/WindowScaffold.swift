@@ -5,7 +5,7 @@ import SwiftUI
 enum WindowMetrics {
     /// The drawn title strip. Windows hide their native title and use a
     /// full-size content view, so the traffic lights sit inside this strip.
-    static let titleBarHeight: CGFloat = 38
+    static let titleBarHeight: CGFloat = 44
     /// Clears the close, minimize and zoom buttons.
     static let trafficLightInset: CGFloat = 76
     static let contentPadding = DesignTokens.Space.lg
@@ -13,7 +13,7 @@ enum WindowMetrics {
     static let footerHeight: CGFloat = 52
     static let footerSpacing = DesignTokens.Space.sm
     /// Space taken by the title strip, the footer and their dividers.
-    static var chromeHeight: CGFloat { titleBarHeight + footerHeight + 2 }
+    static var chromeHeight: CGFloat { titleBarHeight + footerHeight }
 }
 
 /// Title strip, padded content and a footer with the window's actions.
@@ -52,7 +52,7 @@ struct WindowScaffold<Accessory: View, Content: View, Footer: View>: View {
     var body: some View {
         VStack(spacing: 0) {
             titleBar
-            Divider().opacity(0.45)
+            if chrome == .sheet { Divider().opacity(0.45) }
             Group {
                 if scrolls {
                     ScrollView { paddedContent }.scrollIndicators(.automatic)
@@ -60,7 +60,7 @@ struct WindowScaffold<Accessory: View, Content: View, Footer: View>: View {
                     paddedContent.frame(maxHeight: .infinity, alignment: .top)
                 }
             }
-            Divider().opacity(0.45)
+            if chrome == .sheet { Divider().opacity(0.45) }
             HStack(spacing: WindowMetrics.footerSpacing) { footer }
                 .font(.scaled(.body))
                 .controlSize(.regular)
@@ -82,6 +82,8 @@ struct WindowScaffold<Accessory: View, Content: View, Footer: View>: View {
 
     private var titleBar: some View {
         HStack(spacing: WindowMetrics.footerSpacing) {
+            // Windows carry no title text: the traffic lights and the content speak for themselves.
+            if chrome == .sheet {
             Text(title).font(.scaled(.label, weight: .semibold)).lineLimit(1).truncationMode(.tail)
                 .help(title).layoutPriority(1)
                 .accessibilityAddTraits(.isHeader)
@@ -89,12 +91,15 @@ struct WindowScaffold<Accessory: View, Content: View, Footer: View>: View {
                 Text(subtitle).font(.scaled(.caption)).foregroundStyle(PanelPalette.secondaryText).lineLimit(1).truncationMode(.tail)
                     .help(subtitle)
             }
+            }
             Spacer(minLength: WindowMetrics.footerSpacing)
             accessory.fixedSize()
         }
         .padding(.leading, chrome == .window ? WindowMetrics.trafficLightInset : WindowMetrics.contentPadding)
         .padding(.trailing, chrome == .window ? DesignTokens.Space.md : WindowMetrics.contentPadding)
         .frame(height: WindowMetrics.titleBarHeight)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(title)
     }
 }
 
@@ -181,7 +186,7 @@ private struct WindowWell: ViewModifier {
     func body(content: Content) -> some View {
         content
             .padding(padding)
-            .background(Color(nsColor: .textBackgroundColor).opacity(reduceTransparency ? 1 : 0.3), in: RoundedRectangle(cornerRadius: DesignTokens.Radius.md))
-            .overlay { RoundedRectangle(cornerRadius: DesignTokens.Radius.md).strokeBorder(Color(nsColor: .separatorColor).opacity(0.6), lineWidth: 0.5) }
+            .background(Color(nsColor: .textBackgroundColor).opacity(reduceTransparency ? 1 : 0.45), in: RoundedRectangle(cornerRadius: DesignTokens.Radius.lg, style: .continuous))
+            .overlay { RoundedRectangle(cornerRadius: DesignTokens.Radius.lg, style: .continuous).strokeBorder(Color.primary.opacity(0.06), lineWidth: 1) }
     }
 }

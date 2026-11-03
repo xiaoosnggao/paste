@@ -12,7 +12,7 @@ enum WindowLayoutChecks {
         }
         try check(WindowMetrics.trafficLightInset >= 70, "title strip overlaps the traffic lights")
         try check(WindowMetrics.titleBarHeight >= 32, "title strip shorter than the native title bar")
-        try check(WindowMetrics.chromeHeight == WindowMetrics.titleBarHeight + WindowMetrics.footerHeight + 2,
+        try check(WindowMetrics.chromeHeight == WindowMetrics.titleBarHeight + WindowMetrics.footerHeight,
                   "chrome height out of sync with its parts")
 
         // The popover opens above its tab; its fields must fit its height cap.

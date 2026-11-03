@@ -70,16 +70,14 @@ struct PreviewView: View {
         let items = model.visibleItems
         let index = items.firstIndex { $0.id == value.id }
         return HStack(spacing: DesignTokens.Space.sm) {
-            SourceIcon(item: value).frame(width: 20, height: 20).accessibilityHidden(true)
-            ControlGroup {
-                Button { model.movePreview(-1) } label: { Image(systemName: "chevron.left") }
+            HStack(spacing: 0) {
+                PopupIconButton(symbol: "chevron.left", label: "上一张 (←)") { model.movePreview(-1) }
                     .disabled(index.map { $0 == 0 } ?? true)
-                    .help("上一张 (←)").accessibilityLabel("上一张")
-                Button { model.movePreview(1) } label: { Image(systemName: "chevron.right") }
+                PopupIconButton(symbol: "chevron.right", label: "下一张 (→)") { model.movePreview(1) }
                     .disabled(index.map { $0 >= items.count - 1 } ?? true)
-                    .help("下一张 (→)").accessibilityLabel("下一张")
             }
-            .controlSize(.small).fixedSize()
+            .padding(2)
+            .background(Capsule().fill(Color.primary.opacity(0.05)))
             moreMenu(value)
         }
     }
@@ -149,7 +147,7 @@ struct PreviewView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .frame(minHeight: 72, maxHeight: .infinity)
-                .windowWell()
+                .popupCard()
             }
         }
     }
@@ -158,13 +156,14 @@ struct PreviewView: View {
             ProgressView().controlSize(.small)
             WindowFooterNote("正在移除背景…")
         } else {
-            WindowFooterNote(footerNote(value))
+            SourceIcon(item: value).frame(width: 18, height: 18).accessibilityHidden(true)
+            WindowFooterNote("\(value.sourceName) · \(value.createdAt.formatted(date: .abbreviated, time: .shortened)) · \(footerNote(value))")
         }
         Spacer()
         if value.kind == .image && model.processingImageIDs.contains(value.id) {
-            Button("取消") { model.cancelImageProcessing(value.id) }
+            Button("取消") { model.cancelImageProcessing(value.id) }.popupSecondaryStyle()
         }
-        Button("复制") { model.select(value); model.copySelected() }
+        Button("复制") { model.select(value); model.copySelected() }.popupSecondaryStyle()
         Button("粘贴") { model.activate(value) }
             .windowPrimaryAction()
             .help("粘贴到当前应用 (↩)")
@@ -176,7 +175,7 @@ struct PreviewView: View {
             else { ProgressView() }
         }
         .frame(maxWidth: .infinity, minHeight: 96, maxHeight: .infinity)
-        .windowWell(padding: DesignTokens.Space.sm)
+        .popupCard(padding: DesignTokens.Space.sm)
     }
     private func filesContent(_ value: ClipItem) -> some View {
         ScrollView {

@@ -28,7 +28,11 @@ extension AppModel {
 
     /// Space: open the preview window for the selected card, or close it again.
     func togglePreview() {
-        if previewItemID != nil { closePreview(); return }
+        if previewItemID != nil {
+            if isPreviewWindowVisible?() ?? true { closePreview(); return }
+            // The window left the screen without closing: drop the stale card and open again.
+            previewWindowClosed()
+        }
         selectFirstIfNeeded()
         if let item = selectedItems.first { preview(item) }
     }

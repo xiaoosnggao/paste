@@ -27,29 +27,46 @@ struct EditorView: View {
     var body: some View {
         PanelDetailScaffold(model: model, item: item.flatMap { original in model.snapshot.items.first { $0.id == original.id } },
                             page: .edit, title: item == nil ? "新建文本" : "编辑文本", subtitle: item?.sourceName) {
-            VStack(alignment: .leading, spacing: DesignTokens.Space.sm) {
-                TextField("标题（可选）", text: $title).textFieldStyle(PasteboardTextFieldStyle())
-                VStack(spacing: 0) {
-                    formatBar
-                    Divider().opacity(0.6)
-                    RichTextEditor(value: $value, controller: editor)
-                        .padding(DesignTokens.Space.xs)
-                        .frame(maxHeight: .infinity)
-                        .background(InputFocusOnAppear {
-                            guard let view = editor.textView else { return }
-                            view.window?.makeFirstResponder(view)
-                        }.frame(width: 0, height: 0))
-                }
-                .modifier(PasteboardInputSurface(focused: editor.focused, cornerRadius: DesignTokens.Radius.md))
+            // Notes-like: one sheet of paper with a large borderless title over the body.
+            VStack(alignment: .leading, spacing: 0) {
+                TextField("标题", text: $title, prompt: Text("标题").foregroundStyle(.tertiary))
+                    .textFieldStyle(.plain)
+                    .font(.scaled(.heading, weight: .bold))
+                    .padding(.horizontal, DesignTokens.Space.sm)
+                    .padding(.top, DesignTokens.Space.xs)
+                    .accessibilityLabel("标题（可选）")
+                Text(metaLine).font(.scaled(.caption)).foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .padding(.horizontal, DesignTokens.Space.sm)
+                    .padding(.top, DesignTokens.Space.xs)
+                    .padding(.bottom, DesignTokens.Space.sm)
+                RichTextEditor(value: $value, controller: editor)
+                    .frame(maxHeight: .infinity)
+                    .background(InputFocusOnAppear {
+                        guard let view = editor.textView else { return }
+                        view.window?.makeFirstResponder(view)
+                    }.frame(width: 0, height: 0))
             }
+            .popupCard(padding: DesignTokens.Space.md, focused: editor.focused)
         } footer: {
-            WindowFooterNote("\(value.string.count) 个字符")
+            HStack(spacing: 2) {
+                PopupIconButton(symbol: "bold", label: "粗体") { editor.toggleFontTrait(.boldFontMask) }
+                PopupIconButton(symbol: "italic", label: "斜体") { editor.toggleFontTrait(.italicFontMask) }
+                PopupIconButton(symbol: "underline", label: "下划线") { editor.toggleUnderline() }
+            }
+            .padding(2)
+            .background(Capsule().fill(Color.primary.opacity(0.05)))
             if dirty {
-                Text("未保存").font(.scaled(.caption)).foregroundStyle(PanelPalette.secondaryText)
-                    .accessibilityLabel("有未保存的修改")
+                HStack(spacing: DesignTokens.Space.xs) {
+                    Circle().fill(Color.orange).frame(width: 6, height: 6)
+                    Text("未保存").font(.scaled(.caption)).foregroundStyle(PanelPalette.secondaryText)
+                }
+                .padding(.leading, DesignTokens.Space.xs)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("有未保存的修改")
             }
             Spacer()
-            Button("取消") { model.cancelPanelEditor() }
+            Button("取消") { model.cancelPanelEditor() }.popupSecondaryStyle()
             Button("保存") { model.savePanelEditor() }
                 .primaryActionStyle()
                 .disabled(value.string.isEmpty)
@@ -59,28 +76,10 @@ struct EditorView: View {
         .onChange(of: title) { _, next in model.updatePanelEditorDraft(value: value, title: next) }
     }
 
-    private var formatBar: some View {
-        HStack(spacing: DesignTokens.Space.xs) {
-            FormatButton(symbol: "bold", label: "粗体") { editor.toggleFontTrait(.boldFontMask) }
-            FormatButton(symbol: "italic", label: "斜体") { editor.toggleFontTrait(.italicFontMask) }
-            FormatButton(symbol: "underline", label: "下划线") { editor.toggleUnderline() }
-            Spacer()
-        }
-        .padding(.horizontal, DesignTokens.Space.sm)
-        .frame(height: 32)
-    }
-}
-
-private struct FormatButton: View {
-    let symbol: String
-    let label: String
-    let action: () -> Void
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: symbol).font(.scaled(.label, weight: .medium)).frame(width: 26, height: 24)
-        }
-        .buttonStyle(PanelControlStyle())
-        .help(label).accessibilityLabel(label)
+    private var metaLine: String {
+        var parts = ["\(value.string.count) 个字符"]
+        if let source = item?.sourceName, !source.isEmpty { parts.insert(source, at: 0) }
+        return parts.joined(separator: " · ")
     }
 }
 
@@ -153,7 +152,7 @@ struct RichTextEditor: NSViewRepresentable {
         view.minSize = NSSize(width: 0, height: 0)
         view.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         view.textContainer?.widthTracksTextView = true
-        view.textContainerInset = NSSize(width: 6, height: 8)
+        view.textContainerInset = NSSize(width: 4, height: 4)
         view.drawsBackground = false
         view.textStorage?.setAttributedString(value)
         view.delegate = context.coordinator

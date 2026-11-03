@@ -64,43 +64,37 @@ struct PanelDetailScaffold<Content: View, Footer: View>: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            Divider().opacity(0.45)
             content
                 .font(.scaled(.body))
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .padding(.horizontal, DesignTokens.Space.lg)
-                .padding(.vertical, DesignTokens.Space.md)
+                .padding(.horizontal, PopupMetrics.margin)
+                .padding(.top, DesignTokens.Space.xs)
+                .padding(.bottom, showsFooter ? 0 : PopupMetrics.margin)
             if showsFooter {
-                Divider().opacity(0.45)
+                // Floating toolbar: no divider, the content cards end above it.
                 HStack(spacing: DesignTokens.Space.sm) { footer }
                     .font(.scaled(.body))
                     .controlSize(.regular)
-                    .padding(.horizontal, DesignTokens.Space.lg)
-                    .frame(height: PanelDetailLayout.footerHeight)
+                    .padding(.horizontal, PopupMetrics.margin)
+                    .frame(height: PopupMetrics.toolbarHeight)
             }
         }
         .foregroundStyle(PanelPalette.text)
         .tint(PanelPalette.accent)
     }
 
+    /// Only the traffic lights and the page switcher; the window says nothing else up here.
     private var header: some View {
-        HStack(spacing: DesignTokens.Space.sm) {
-            if let item { SourceIcon(item: item).frame(width: 20, height: 20).accessibilityHidden(true) }
-            // With a card, the page bar names the page; the header names the card once.
-            let heading = item.map(Self.cardTitle) ?? title
-            Text(heading).font(.scaled(.label, weight: .semibold)).lineLimit(1).truncationMode(.tail)
-                .help(heading).layoutPriority(1).accessibilityAddTraits(.isHeader)
-                .accessibilityLabel(item == nil ? title : "\(title)：\(heading)")
-            if let detail = item?.sourceName ?? subtitle, !detail.isEmpty {
-                Text(detail).font(.scaled(.caption)).foregroundStyle(PanelPalette.secondaryText).lineLimit(1).truncationMode(.tail)
+        ZStack {
+            if let item {
+                PanelDetailPageBar(model: model, item: item, current: page)
             }
-            Spacer(minLength: DesignTokens.Space.md)
-            if let item { PanelDetailPageBar(model: model, item: item, current: page).fixedSize() }
         }
-        // The window's own close button sits at the leading edge; Esc closes too.
-        .padding(.leading, WindowMetrics.trafficLightInset)
-        .padding(.trailing, DesignTokens.Space.md)
-        .frame(height: PanelDetailLayout.headerHeight)
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, WindowMetrics.trafficLightInset)
+        .frame(height: PopupMetrics.topBarHeight)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(item.map { "\(title)：\(Self.cardTitle($0))" } ?? title)
     }
 
     static func cardTitle(_ item: ClipItem) -> String {
@@ -117,21 +111,10 @@ struct PanelDetailPageBar: View {
     let current: PanelDetailPage
 
     var body: some View {
-        HStack(spacing: DesignTokens.Space.xs) {
-            ForEach(PanelDetailPage.layerPages.filter { $0.isAvailable(for: item) }) { page in
-                let selected = page == current
-                Button { model.showDetailPage(page, for: item) } label: {
-                    Label(page.title, systemImage: page.systemImage)
-                        .font(.scaled(.label, weight: selected ? .semibold : .regular))
-                        .padding(.horizontal, DesignTokens.Space.sm).padding(.vertical, DesignTokens.Space.xs)
-                        .background(selected ? PanelPalette.hover : .clear, in: Capsule())
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(selected ? PanelPalette.text : PanelPalette.secondaryText)
-                .help("\(page.title) (\(page.shortcutLabel))")
-                .accessibilityAddTraits(selected ? .isSelected : [])
-            }
-        }
+        PopupSegmentedControl(options: PanelDetailPage.layerPages.filter { $0.isAvailable(for: item) },
+                              selection: current,
+                              title: { $0.title }, symbol: { $0.systemImage },
+                              help: { "\($0.title) (\($0.shortcutLabel))" },
+                              select: { model.showDetailPage($0, for: item) })
     }
 }
