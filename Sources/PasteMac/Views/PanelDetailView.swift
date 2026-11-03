@@ -8,6 +8,7 @@ import PasteCore
 /// The detail window's root: follows the model so page switches reuse the window.
 struct PanelDetailWindowView: View {
     @ObservedObject var model: AppModel
+
     var body: some View {
         if let detail = model.panelDetail { PanelDetailView(model: model, detail: detail) }
         else { Color.clear }
@@ -83,6 +84,9 @@ struct PanelDetailScaffold<Content: View, Footer: View>: View {
         .tint(PanelPalette.accent)
     }
 
+    /// Measured from the window's close button; fallback until the window exists.
+    @State private var trafficLightCenterY = PopupMetrics.trafficLightCenterY
+
     /// Only the traffic lights and the page switcher; the window says nothing else up here.
     private var header: some View {
         ZStack {
@@ -92,7 +96,10 @@ struct PanelDetailScaffold<Content: View, Footer: View>: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.horizontal, WindowMetrics.trafficLightInset)
-        .frame(height: PopupMetrics.topBarHeight)
+        // Centered on the traffic lights' line, like the preview's toolbar.
+        .frame(height: trafficLightCenterY * 2)
+        .frame(height: max(PopupMetrics.topBarHeight, trafficLightCenterY * 2), alignment: .top)
+        .background(TrafficLightReader { trafficLightCenterY = $0 }.frame(width: 0, height: 0))
         .accessibilityElement(children: .contain)
         .accessibilityLabel(item.map { "\(title)：\(Self.cardTitle($0))" } ?? title)
     }

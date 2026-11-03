@@ -11,18 +11,13 @@ struct PreviewSuggestionsSection: View {
             HStack(spacing: DesignTokens.Space.xs) {
                 Label("建议", systemImage: "sparkles").font(.scaled(.label, weight: .semibold)).foregroundStyle(PanelPalette.accent)
                 Spacer(minLength: 0)
-                if model.contextSuggestionsLoading { ProgressView().controlSize(.mini).help("AI 建议生成中") }
-                if model.contextSuggestionKey != nil {
-                    Button("重新生成", action: model.retryContextSuggestions).buttonStyle(.plain).font(.scaled(.caption))
-                        .foregroundStyle(PanelPalette.accent)
+                if model.contextSuggestionKey != nil || model.contextSuggestionsLoading {
+                    RegenerateButton(loading: model.contextSuggestionsLoading, action: model.retryContextSuggestions)
                         .disabled(model.contextSuggestionsLoading || model.contextSuggestionApplyingID != nil)
-                    Button(action: model.dismissContextSuggestions) { Image(systemName: "xmark") }
-                        .buttonStyle(.plain).foregroundStyle(PanelPalette.secondaryText).help("隐藏建议").accessibilityLabel("隐藏建议")
                 }
             }
-            Text(subtitle).font(.scaled(.caption)).foregroundStyle(PanelPalette.secondaryText).lineLimit(1).truncationMode(.middle)
             if model.suggestionStripShowsHint {
-                Button("显示建议", action: model.retryContextSuggestions).buttonStyle(.plain).font(.scaled(.caption)).foregroundStyle(PanelPalette.accent)
+                SuggestionsPromptCard(action: model.retryContextSuggestions)
             } else {
                 if model.selectedIDs.count > 1, let id = model.previewItemID, model.selectedIDs.contains(id) { multiSummary }
                 if let error = model.contextSuggestionsError {
@@ -63,12 +58,6 @@ struct PreviewSuggestionsSection: View {
         .animation(.easeOut(duration: 0.16), value: model.displayedSuggestions.map(\.id))
     }
 
-    private var subtitle: String {
-        let target = model.pasteEngine.target?.name ?? "复制到剪贴板"
-        if model.selectedIDs.count > 1 { return "已选 \(model.selectedIDs.count) 项 → \(target)" }
-        let source = model.selectedItems.first?.sourceName ?? ""
-        return "\(source.isEmpty ? "未知来源" : source) → \(target)"
-    }
 
     @ViewBuilder private var multiSummary: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -98,5 +87,72 @@ struct PreviewSuggestionsSection: View {
             value = value.replacingOccurrences(of: "[\(item.id.uuidString)]", with: (item.sourceName.isEmpty ? "来源" : item.sourceName) + "：")
         }
         return value
+    }
+}
+
+/// Subtle refresh icon for the 建议 header; spins while suggestions load.
+private struct RegenerateButton: View {
+    let loading: Bool
+    let action: () -> Void
+    @State private var hovering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "arrow.clockwise")
+                .font(.scaled(.caption, weight: .semibold))
+                .foregroundStyle(hovering && !loading ? PanelPalette.text : PanelPalette.secondaryText)
+                .rotationEffect(.degrees(loading && !reduceMotion ? 360 : 0))
+                .animation(loading && !reduceMotion ? .linear(duration: 0.9).repeatForever(autoreverses: false) : .default, value: loading)
+                .frame(width: 22, height: 22)
+                .background(hovering && !loading ? PanelPalette.hover : .clear, in: Circle())
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(loading ? "AI 建议生成中" : "重新生成")
+        .accessibilityLabel("重新生成")
+    }
+}
+
+extension AppModel {
+    /// "Source → target" for the preview title bar: where the clip came from and where paste goes.
+    var suggestionRoute: String {
+        let target = pasteEngine.target?.name ?? "复制到剪贴板"
+        if selectedIDs.count > 1 { return "已选 \(selectedIDs.count) 项 → \(target)" }
+        let source = selectedItems.first?.sourceName ?? ""
+        return "\(source.isEmpty ? "未知来源" : source) → \(target)"
+    }
+}
+
+/// Collapsed suggestions (images, files, or before any request): a full-width card that
+/// explains what it does instead of a lone link.
+private struct SuggestionsPromptCard: View {
+    let action: () -> Void
+    @State private var hovering = false
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: DesignTokens.Space.md) {
+                Image(systemName: "wand.and.sparkles")
+                    .font(.scaled(.label, weight: .semibold)).foregroundStyle(PanelPalette.accent)
+                    .frame(width: 32, height: 32)
+                    .background(Circle().fill(PanelPalette.accent.opacity(0.14)))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("生成建议").font(.scaled(.label, weight: .semibold)).foregroundStyle(PanelPalette.text)
+                    Text("按内容和要粘贴到的应用推荐下一步").font(.scaled(.caption)).foregroundStyle(PanelPalette.secondaryText)
+                        .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right").font(.scaled(.caption, weight: .semibold)).foregroundStyle(PanelPalette.secondaryText)
+            }
+            .padding(DesignTokens.Space.md)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(hovering ? PanelPalette.hover : PanelPalette.surface, in: RoundedRectangle(cornerRadius: DesignTokens.Radius.md, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: DesignTokens.Radius.md, style: .continuous).strokeBorder(Color.primary.opacity(0.08), lineWidth: 1))
+            .contentShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.md))
+        }
+        .buttonStyle(.plain).focusEffectDisabled()
+        .onHover { hovering = $0 }
+        .accessibilityLabel("生成建议")
     }
 }

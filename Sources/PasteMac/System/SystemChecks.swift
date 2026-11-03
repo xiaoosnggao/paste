@@ -152,7 +152,29 @@ enum SystemChecks {
                 try check(dark ? (tint?.alphaComponent ?? 0) >= 0.75 : (tint?.alphaComponent ?? 1) < 0.4,
                           "glass tint lost dark contrast protection or light translucency")
             }
+            let tintAlpha = nativeSurface.tintLayerColor?.alphaComponent ?? 0
+            try check(tintAlpha >= (dark ? PanelGlassSurface.tintAlpha.dark : PanelGlassSurface.tintAlpha.light) - 0.001,
+                      "panel background lets the windows behind it show through")
         }
+        // Traffic-light center line: window base coords (bottom-left origin) → distance from top.
+        try check(TrafficLightGeometry.centerFromTop(buttonRect: NSRect(x: 20, y: 452, width: 16, height: 16), contentHeight: 480) == 20,
+                  "traffic-light center conversion is wrong")
+        let lightsWindow = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 400),
+                                    styleMask: [.titled, .closable, .fullSizeContentView], backing: .buffered, defer: false)
+        lightsWindow.isReleasedWhenClosed = false
+        lightsWindow.titlebarAppearsTransparent = true
+        if let measured = TrafficLightGeometry.measure(lightsWindow) {
+            try check(measured > 4 && measured < 40, "measured traffic-light center \(measured) is implausible")
+        }
+        try check(TrafficLightGeometry.titlebarDrop(containerHeight: 28, target: 23) == 9, "titlebar drop math is wrong")
+        try check(TrafficLightGeometry.buttonOrigins(sizes: [NSSize(width: 14, height: 14), NSSize(width: 14, height: 14)], step: 20,
+                                                     stripHeight: 28, leading: 16) == [NSPoint(x: 16, y: 7), NSPoint(x: 36, y: 7)],
+                  "traffic-light origins are wrong")
+        TrafficLightGeometry.applyLayout(to: lightsWindow)
+        if let moved = TrafficLightGeometry.measure(lightsWindow) {
+            try check(abs(moved - TrafficLightGeometry.targetCenterFromTop) <= 1, "traffic lights did not move to \(TrafficLightGeometry.targetCenterFromTop), got \(moved)")
+        }
+        lightsWindow.close()
         let upper = NSRect(x: 0, y: 1080, width: 1920, height: 1080)
         let lower = NSRect(x: 0, y: 0, width: 1920, height: 1080)
         let upperWindow = PanelPresentation.visibleFrame(on: upper)
@@ -304,6 +326,7 @@ enum SystemChecks {
         count += try await IntelligenceChecks.run()
         count += try await MCPChecks.run()
         count += try await AppDelegate.checkCapturePanelHandoff()
+        count += try await AppDelegate.checkColdStartPreview()
         count += try ScreenshotChecks.run()
         count += try await ScreenshotChecks.runLifecycle()
         count += try MenuShortcut.checkPresentation()

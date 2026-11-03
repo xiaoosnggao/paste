@@ -42,13 +42,17 @@ struct SettingsView: View {
 
     private func content(titlebarInset: CGFloat) -> some View {
         HStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 2) {
-                Color.clear.frame(height: titlebarInset + 12)
+            VStack(alignment: .leading, spacing: 4) {
+                Color.clear.frame(height: titlebarInset + 16)
                 ForEach(SettingsPage.allCases) { entry in
                     Button { page = entry } label: {
-                        Label(entry.rawValue, systemImage: entry.symbol)
-                            .font(.scaled(.body)).frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 12).padding(.vertical, 6)
+                        // System Settings–like rows: 32 pt tall, roomy icon column.
+                        Label { Text(entry.rawValue) } icon: {
+                            Image(systemName: entry.symbol).frame(width: 20)
+                        }
+                            .labelStyle(SidebarRowLabelStyle())
+                            .font(.scaled(.body)).frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+                            .padding(.horizontal, 10)
                             .contentShape(Rectangle())
                     }.buttonStyle(PanelControlStyle(selected: page == entry)).focusEffectDisabled()
                         .accessibilityAddTraits(page == entry ? .isSelected : [])
@@ -58,7 +62,7 @@ struct SettingsView: View {
                     Text("Pasteboard \(version)").font(.caption).foregroundStyle(.tertiary)
                         .padding(.horizontal, 12).padding(.bottom, 12)
                 }
-            }.padding(.horizontal, 10).frame(width: 200)
+            }.padding(.horizontal, 12).frame(width: 212)
                 .background(Color(nsColor: .windowBackgroundColor).opacity(reduceTransparency ? 1 : 0.12))
             VStack(alignment: .leading, spacing: 0) {
                 Text(page.rawValue).font(.scaled(.title, weight: .bold)).padding(.horizontal, 25).padding(.top, 20).padding(.bottom, 12)
@@ -271,5 +275,12 @@ struct ShortcutRecorder: NSViewRepresentable {
             text += event.charactersIgnoringModifiers?.uppercased() ?? "\(event.keyCode)"
             captured?(UInt32(event.keyCode), carbon, text)
         }
+    }
+}
+
+/// Icon and title with System Settings spacing.
+private struct SidebarRowLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 10) { configuration.icon; configuration.title.lineLimit(1) }
     }
 }

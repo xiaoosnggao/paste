@@ -55,6 +55,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private var permissionResumeTask: Task<Void, Never>?
     private var toolKeyMonitor: Any?
     private var previewWindow: NSWindow?
+    /// Keeps each popup window's traffic lights at the shared inset.
+    private var trafficLightPositioners: [ObjectIdentifier: TrafficLightPositioner] = [:]
+    private let previewLogger = Logger(subsystem: "com.gaoxs.pasteboard", category: "preview")
     private var previewKeyMonitor: Any?
     private var detailWindow: NSWindow?
     private var detailKeyMonitor: Any?
@@ -104,8 +107,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
         model.onEditor = { [weak self] item in self?.showEditor(item) }
         model.onEditorClose = { [weak self] in self?.model.cancelPanelEditor() }
-        model.onPreview = { [weak self] item in self?.showPreview(item) }
-        model.isPreviewWindowVisible = { [weak self] in self?.previewWindow?.isVisible == true }
+        wirePreviewWindow()
         model.onIntelligence = { [weak self] item in self?.showIntelligence(item) }
         model.onStack = { [weak self] in self?.showStack() }
         model.onStackPasted = { [weak self] in self?.placeStackCapsule(followMouse: true) }
@@ -155,6 +157,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             model.restoreStackShortcutDescription(defaults.string(forKey: "stackShortcutDescription") ?? "⇧⌘C")
         } else { model.restoreStackShortcutDescription("⇧⌘C（占用）") }
         installInputMonitors()
+        // Cold start: the first Space must not pay for building the window and its SwiftUI tree.
+        DispatchQueue.main.async { [weak self] in self?.prewarmPreviewWindow() }
         model.startMonitoring()
         showPanel()
     }
@@ -306,6 +310,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         if panelPresented { hidePanel(restoreTarget: true) } else { showPanel() }
     }
 
+    /// Space and the preview button route through here, in the app and in the self-checks.
+    private func wirePreviewWindow() {
+        model.onPreview = { [weak self] item in self?.showPreview(item) }
+        // On screen means this Space too: a window left on another Space must reopen, not close.
+        model.isPreviewWindowVisible = { [weak self] in
+            guard let window = self?.previewWindow else { return false }
+            return window.isVisible && window.isOnActiveSpace
+        }
+    }
+    /// Builds the preview window ahead of the first Space, so that press only fills and shows it.
+    private func prewarmPreviewWindow() {
+        guard previewWindow == nil else { return }
+        let value = window(title: "预览", size: .init(width: 720, height: 480), view: PreviewWindowView(model: model))
+        value.contentView?.layoutSubtreeIfNeeded()
+        previewWindow = value
+    }
     private func window<V: View>(title: String, size: NSSize, view: V) -> NSWindow {
         let value = NSWindow(contentRect: NSRect(origin: .zero, size: size),
                              styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
@@ -316,8 +336,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         value.isReleasedWhenClosed = false
         value.isOpaque = false; value.backgroundColor = .clear
         value.contentView = PanelGlassContainer.make(content: view, frame: NSRect(origin: .zero, size: size), cornerRadius: DesignTokens.Radius.window)
+        // Follow the user to the current Space or full-screen app instead of opening elsewhere.
+        value.collectionBehavior.insert(.moveToActiveSpace)
+        value.collectionBehavior.insert(.fullScreenAuxiliary)
         place(value)
         value.delegate = self
+        trafficLightPositioners[ObjectIdentifier(value)] = TrafficLightPositioner(window: value)
         return value
     }
     /// Opens a secondary window above the clipboard panel instead of
@@ -339,8 +363,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         window.orderFrontRegardless()
-        // Activation completes asynchronously; claim key once it has.
-        DispatchQueue.main.async { if window.isVisible, !window.isKeyWindow { window.makeKeyAndOrderFront(nil) } }
+        trafficLightPositioners[ObjectIdentifier(window)]?.apply()
+        // Activation completes asynchronously and can reorder or decline. Re-assert on the
+        // next turns of the run loop until the window is on screen and key.
+        for delay in [0.0, 0.08, 0.25] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self, self.shouldStayPresented(window) else { return }
+                if !window.isVisible || !window.isOnActiveSpace { window.orderFrontRegardless() }
+                if !window.isKeyWindow {
+                    if !NSApp.isActive { NSApp.activate(ignoringOtherApps: true) }
+                    window.makeKeyAndOrderFront(nil)
+                }
+                self.trafficLightPositioners[ObjectIdentifier(window)]?.apply()
+            }
+        }
+    }
+    /// A window closed between `present` and a retry stays closed.
+    private func shouldStayPresented(_ window: NSWindow) -> Bool {
+        if window === previewWindow { return model.previewItemID != nil }
+        if window === detailWindow { return model.panelDetail != nil }
+        return true
     }
     private func showSettings() {
         // This status-bar-level, nonactivating panel otherwise remains above
@@ -363,12 +405,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         // Reuse the window even when it is ordered out. Closing a hidden one here used to
         // fire windowWillClose after the new card was set, clearing it again, so the
         // next Space only "closed" an empty preview and a second press was needed.
-        if let previewWindow {
-            previewWindow.title = title
-        } else {
-            previewWindow = window(title: title, size: .init(width: 720, height: 480), view: PreviewWindowView(model: model))
-        }
+        prewarmPreviewWindow()
+        guard let previewWindow else { return }
+        previewWindow.title = title
+        let wasVisible = previewWindow.isVisible
+        // A hidden window is placed again, so it opens above the panel's current frame.
+        if !wasVisible { place(previewWindow) }
         present(previewWindow)
+        previewLogger.debug("show: wasVisible=\(wasVisible) visible=\(previewWindow.isVisible) key=\(previewWindow.isKeyWindow) active=\(NSApp.isActive)")
     }
     private func showStack() {
         model.pasteEngine.rememberTarget()
@@ -727,6 +771,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             model.closePanelDetail()
             if panelPresented, panel?.isVisible == true { panel?.makeKey() }
         }
+        if let closing = notification.object as? NSWindow, closing !== previewWindow {
+            trafficLightPositioners[ObjectIdentifier(closing)] = nil
+        }
         if notification.object as? NSWindow === previewWindow {
             model.previewWindowClosed()
             // Keys go back to the panel so ← → and Space keep working there.
@@ -888,6 +935,52 @@ extension AppDelegate {
     @objc func previewShowSettings() { showSettings() }
     @objc func previewHidePanel() { hidePanel() }
     @objc func previewShowPanel() { showPanel(rememberTarget: false) }
+
+    /// Cold start: a fresh delegate with no preview window yet. The first Space must put the
+    /// window on screen with the card, and the next press must close it.
+    @MainActor
+    static func checkColdStartPreview() async throws -> Int {
+        func check(_ condition: Bool, _ message: String) throws {
+            if !condition { throw NSError(domain: "PreviewChecks", code: 1, userInfo: [NSLocalizedDescriptionKey: message]) }
+        }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("pasteboard-preview-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let model = AppModel(isDemo: true, storageDirectory: directory)
+        guard !model.visibleItems.isEmpty else { return 0 }
+        let owner = AppDelegate()
+        owner.model = model
+        owner.panel = ClipboardPanel(contentRect: NSRect(x: 0, y: 0, width: 300, height: 100),
+                                     styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        owner.panel.isReleasedWhenClosed = false
+        owner.wirePreviewWindow()
+        model.onPreviewClose = { [weak owner] in owner?.previewWindow?.close() }
+        defer { owner.previewWindow?.close(); owner.panel.close() }
+        try check(owner.previewWindow == nil, "cold-start fixture already had a preview window")
+        model.togglePreview()
+        try check(model.previewItemID != nil, "first Space after launch did not pick a card")
+        try check(owner.previewWindow?.isVisible == true, "first Space after launch did not show the preview window")
+        try await Task.sleep(nanoseconds: 300_000_000)
+        try check(owner.previewWindow?.isVisible == true && model.previewItemID != nil, "the preview window left the screen after the first Space")
+        model.togglePreview()
+        try check(model.previewItemID == nil && owner.previewWindow?.isVisible == false, "second Space did not close the preview")
+        model.togglePreview()
+        try check(owner.previewWindow?.isVisible == true, "third Space did not reopen the preview")
+        // Pre-warmed and hidden, as at launch: one press still shows it.
+        model.togglePreview()
+        let warm = AppDelegate()
+        warm.model = model
+        warm.panel = owner.panel
+        warm.wirePreviewWindow()
+        warm.prewarmPreviewWindow()
+        model.onPreviewClose = { [weak warm] in warm?.previewWindow?.close() }
+        defer { warm.previewWindow?.close() }
+        try check(warm.previewWindow?.isVisible == false, "pre-warming showed the preview window")
+        model.togglePreview()
+        try check(warm.previewWindow?.isVisible == true && model.previewItemID != nil, "first Space on a pre-warmed window did not show it")
+        model.closePreview()
+        model.onPreview = nil; model.onPreviewClose = nil; model.isPreviewWindowVisible = nil
+        return 5
+    }
 
     /// Exercises the immediate handoff used by capture and settings with hidden test windows.
     /// No screen access or clipboard writes.
