@@ -1,0 +1,163 @@
+import AppKit
+import SwiftUI
+
+/// Layout shared by the windows and sheets opened from a card's context menu.
+enum WindowMetrics {
+    /// The drawn title strip. Windows hide their native title and use a
+    /// full-size content view, so the traffic lights sit inside this strip.
+    static let titleBarHeight: CGFloat = 38
+    /// Clears the close, minimize and zoom buttons.
+    static let trafficLightInset: CGFloat = 76
+    static let contentPadding = DesignTokens.Space.lg
+    static let sectionSpacing = DesignTokens.Space.md
+    static let footerHeight: CGFloat = 52
+    static let footerSpacing = DesignTokens.Space.sm
+    /// Space taken by the title strip, the footer and their dividers.
+    static var chromeHeight: CGFloat { titleBarHeight + footerHeight + 2 }
+}
+
+/// Title strip, padded content and a footer with the window's actions.
+///
+/// Put the primary button last in the footer and give it `.windowPrimaryAction()`
+/// so Return triggers it; give Cancel or Close `.windowCancelAction()` so Esc does.
+struct WindowScaffold<Accessory: View, Content: View, Footer: View>: View {
+    enum Chrome {
+        /// A titled window: the title strip clears the traffic lights.
+        case window
+        /// A sheet: no traffic lights, the title lines up with the content.
+        case sheet
+    }
+
+    let title: String
+    var subtitle: String?
+    var chrome: Chrome
+    /// Content scrolls when the window or sheet is too short for it.
+    var scrolls: Bool
+    let accessory: Accessory
+    let content: Content
+    let footer: Footer
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    init(_ title: String, subtitle: String? = nil, chrome: Chrome = .window, scrolls: Bool = false,
+         @ViewBuilder accessory: () -> Accessory, @ViewBuilder content: () -> Content, @ViewBuilder footer: () -> Footer) {
+        self.title = title
+        self.subtitle = subtitle
+        self.chrome = chrome
+        self.scrolls = scrolls
+        self.accessory = accessory()
+        self.content = content()
+        self.footer = footer()
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            titleBar
+            Divider().opacity(0.45)
+            Group {
+                if scrolls {
+                    ScrollView { paddedContent }.scrollIndicators(.automatic)
+                } else {
+                    paddedContent.frame(maxHeight: .infinity, alignment: .top)
+                }
+            }
+            Divider().opacity(0.45)
+            HStack(spacing: WindowMetrics.footerSpacing) { footer }
+                .font(.scaled(.body))
+                .controlSize(.regular)
+                .padding(.horizontal, WindowMetrics.contentPadding)
+                .frame(height: WindowMetrics.footerHeight)
+        }
+        .foregroundStyle(PanelPalette.text)
+        .tint(PanelPalette.accent)
+        .ignoresSafeArea(.container, edges: chrome == .window ? .top : [])
+        .background(Color(nsColor: .windowBackgroundColor).opacity(reduceTransparency && chrome == .window ? 1 : 0))
+    }
+
+    private var paddedContent: some View {
+        content
+            .font(.scaled(.body))
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .padding(WindowMetrics.contentPadding)
+    }
+
+    private var titleBar: some View {
+        HStack(spacing: WindowMetrics.footerSpacing) {
+            Text(title).font(.scaled(.label, weight: .semibold)).lineLimit(1)
+                .accessibilityAddTraits(.isHeader)
+            if let subtitle, !subtitle.isEmpty {
+                Text(subtitle).font(.scaled(.caption)).foregroundStyle(PanelPalette.secondaryText).lineLimit(1).truncationMode(.middle)
+            }
+            Spacer(minLength: WindowMetrics.footerSpacing)
+            accessory
+        }
+        .padding(.leading, chrome == .window ? WindowMetrics.trafficLightInset : WindowMetrics.contentPadding)
+        .padding(.trailing, chrome == .window ? DesignTokens.Space.md : WindowMetrics.contentPadding)
+        .frame(height: WindowMetrics.titleBarHeight)
+    }
+}
+
+extension WindowScaffold where Accessory == EmptyView {
+    init(_ title: String, subtitle: String? = nil, chrome: Chrome = .window, scrolls: Bool = false,
+         @ViewBuilder content: () -> Content, @ViewBuilder footer: () -> Footer) {
+        self.init(title, subtitle: subtitle, chrome: chrome, scrolls: scrolls, accessory: { EmptyView() }, content: content, footer: footer)
+    }
+}
+
+extension View {
+    /// The window's main action: accent fill, triggered by Return.
+    func windowPrimaryAction() -> some View {
+        buttonStyle(.borderedProminent)
+            .tint(PanelPalette.accent)
+            .foregroundStyle(PanelPalette.onAccent)
+            .keyboardShortcut(.defaultAction)
+    }
+
+    /// Cancel or Close, triggered by Esc.
+    func windowCancelAction() -> some View {
+        keyboardShortcut(.cancelAction)
+    }
+
+    /// A recessed area for text, lists and images inside a glass window.
+    func windowWell(padding: CGFloat = DesignTokens.Space.md) -> some View {
+        modifier(WindowWell(padding: padding))
+    }
+}
+
+/// Status text at the leading edge of a footer.
+struct WindowFooterNote: View {
+    let text: String
+    init(_ text: String) { self.text = text }
+    var body: some View {
+        Text(text).font(.scaled(.caption)).foregroundStyle(PanelPalette.secondaryText)
+            .lineLimit(1).truncationMode(.tail).help(text)
+    }
+}
+
+/// Section caption inside window content.
+struct WindowSectionHeader: View {
+    let text: String
+    init(_ text: String) { self.text = text }
+    var body: some View {
+        Text(text).font(.scaled(.caption, weight: .semibold)).foregroundStyle(PanelPalette.secondaryText)
+            .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// Closes the window that holds the button. Used for windows without a Cancel.
+struct WindowCloseButton: View {
+    var title = "关闭"
+    var body: some View {
+        Button(title) { NSApp.keyWindow?.performClose(nil) }.windowCancelAction()
+    }
+}
+
+private struct WindowWell: ViewModifier {
+    let padding: CGFloat
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    func body(content: Content) -> some View {
+        content
+            .padding(padding)
+            .background(Color(nsColor: .textBackgroundColor).opacity(reduceTransparency ? 1 : 0.3), in: RoundedRectangle(cornerRadius: DesignTokens.Radius.md))
+            .overlay { RoundedRectangle(cornerRadius: DesignTokens.Radius.md).strokeBorder(Color(nsColor: .separatorColor).opacity(0.6), lineWidth: 0.5) }
+    }
+}

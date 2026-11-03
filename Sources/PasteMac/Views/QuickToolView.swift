@@ -21,13 +21,13 @@ struct QuickToolView: View {
         VStack(spacing: 0) {
             titlebar
             Divider().opacity(0.45)
-            VStack(spacing: 12) {
+            VStack(spacing: WindowMetrics.sectionSpacing) {
                 services
                 if hasImage { imageStrip }
                 content
                 if let error = model.toolError ?? model.storageError { errorRow(error) }
                 footer
-            }.padding(16)
+            }.padding(WindowMetrics.contentPadding)
         }
         .frame(minWidth: 540, minHeight: 390)
         .ignoresSafeArea(.container, edges: .top)
@@ -41,13 +41,13 @@ struct QuickToolView: View {
     private var titlebar: some View {
         HStack(spacing: 8) {
             Text("识别与翻译").font(.scaled(.label, weight: .semibold)).allowsHitTesting(false)
-            ToolWindowDragRegion().frame(maxWidth: .infinity).frame(height: 38)
+            ToolWindowDragRegion().frame(maxWidth: .infinity).frame(height: WindowMetrics.titleBarHeight)
             if model.isDemo { Text("DEMO").font(.scaled(.micro, weight: .medium)).foregroundStyle(.tertiary) }
             Image(systemName: "lock.shield").font(.scaled(.caption)).foregroundStyle(.tertiary)
                 .help("系统服务在本机处理；云服务仅接收当前图片或文字。")
             ToolIconButton(symbol: "slider.horizontal.3", label: "服务设置") { model.onSettings?() }
             ToolIconButton(symbol: model.toolPinned ? "pin.fill" : "pin", label: "固定窗口 ⌘P", active: model.toolPinned) { model.toolPinned.toggle() }
-        }.padding(.leading, 76).padding(.trailing, 10).frame(height: 38)
+        }.padding(.leading, WindowMetrics.trafficLightInset).padding(.trailing, DesignTokens.Space.md).frame(height: WindowMetrics.titleBarHeight)
     }
 
     private var services: some View {
@@ -230,7 +230,7 @@ struct QuickToolView: View {
                         Text(translation == nil ? "翻译" : "重新翻译")
                         Text("↩").opacity(0.65)
                     }.font(.scaled(.label, weight: .medium)).padding(.horizontal, 5)
-                }.buttonStyle(.borderedProminent).controlSize(.large).disabled(!hasImage && model.toolInputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }.buttonStyle(.borderedProminent).tint(PanelPalette.accent).foregroundStyle(PanelPalette.onAccent).controlSize(.large).disabled(!hasImage && model.toolInputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     .help("停止输入0.75秒自动翻译；按回车立即翻译")
             }
         }.frame(minHeight: 32)
@@ -317,9 +317,9 @@ private struct ToolIconButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol).font(.scaled(.label, weight: .medium))
-                .foregroundStyle(active ? Color.accentColor : Color.secondary)
+                .foregroundStyle(active ? PanelPalette.accent : PanelPalette.secondaryText)
                 .frame(width: 27, height: 27)
-                .background((active ? Color.accentColor.opacity(0.1) : Color.primary.opacity(hovering ? 0.06 : 0)), in: RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))
+                .background((active ? PanelPalette.accent.opacity(0.12) : (hovering ? PanelPalette.hover : Color.clear)), in: RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))
         }.buttonStyle(.plain).help(label).accessibilityLabel(label)
             .onHover { hovering = $0 }
     }

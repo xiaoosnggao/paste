@@ -19,30 +19,55 @@ struct EditorView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(item == nil ? "新建文本" : "编辑文本").font(.title2.bold())
-            TextField("标题（可选）", text: $title).textFieldStyle(PasteboardTextFieldStyle())
-            HStack(spacing: 6) {
-                Button { editor.toggleFontTrait(.boldFontMask) } label: { Image(systemName: "bold").frame(width: 23) }.help("粗体")
-                Button { editor.toggleFontTrait(.italicFontMask) } label: { Image(systemName: "italic").frame(width: 23) }.help("斜体")
-                Button { editor.toggleUnderline() } label: { Image(systemName: "underline").frame(width: 23) }.help("下划线")
-                Spacer()
-                Text("富文本").font(.caption).foregroundStyle(.secondary)
-            }.buttonStyle(.borderless)
-            RichTextEditor(value: $value, controller: editor)
-                .padding(8).modifier(PasteboardInputSurface(focused: editor.focused, cornerRadius: DesignTokens.Radius.lg))
-                .background(InputFocusOnAppear {
-                    guard let view = editor.textView else { return }
-                    view.window?.makeFirstResponder(view)
-                }.frame(width: 0, height: 0))
-            HStack {
-                Text("\(value.string.count) 个字符").font(.caption).foregroundStyle(.secondary)
-                Spacer()
-                Button("取消") { model.closeEditor() }.keyboardShortcut(.cancelAction)
-                Button("保存") { if model.saveRichText(value, title: title, item: item) { model.closeEditor() } }
-                    .keyboardShortcut(.defaultAction).disabled(value.string.isEmpty)
+        WindowScaffold(item == nil ? "新建文本" : "编辑文本", subtitle: item?.sourceName) {
+            VStack(alignment: .leading, spacing: WindowMetrics.sectionSpacing) {
+                TextField("标题（可选）", text: $title).textFieldStyle(PasteboardTextFieldStyle())
+                VStack(spacing: 0) {
+                    formatBar
+                    Divider().opacity(0.6)
+                    RichTextEditor(value: $value, controller: editor)
+                        .padding(DesignTokens.Space.xs)
+                        .frame(maxHeight: .infinity)
+                        .background(InputFocusOnAppear {
+                            guard let view = editor.textView else { return }
+                            view.window?.makeFirstResponder(view)
+                        }.frame(width: 0, height: 0))
+                }
+                .modifier(PasteboardInputSurface(focused: editor.focused, cornerRadius: DesignTokens.Radius.md))
             }
-        }.padding(24).frame(minWidth: 520, minHeight: 380)
+        } footer: {
+            WindowFooterNote("\(value.string.count) 个字符")
+            Spacer()
+            Button("取消") { model.closeEditor() }.windowCancelAction()
+            Button("保存") { if model.saveRichText(value, title: title, item: item) { model.closeEditor() } }
+                .windowPrimaryAction().disabled(value.string.isEmpty)
+        }
+        .frame(minWidth: 520, minHeight: 380)
+    }
+
+    private var formatBar: some View {
+        HStack(spacing: DesignTokens.Space.xs) {
+            FormatButton(symbol: "bold", label: "粗体") { editor.toggleFontTrait(.boldFontMask) }
+            FormatButton(symbol: "italic", label: "斜体") { editor.toggleFontTrait(.italicFontMask) }
+            FormatButton(symbol: "underline", label: "下划线") { editor.toggleUnderline() }
+            Spacer()
+            Text("富文本").font(.scaled(.caption)).foregroundStyle(PanelPalette.secondaryText)
+        }
+        .padding(.horizontal, DesignTokens.Space.sm)
+        .frame(height: 32)
+    }
+}
+
+private struct FormatButton: View {
+    let symbol: String
+    let label: String
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.scaled(.label, weight: .medium)).frame(width: 26, height: 24)
+        }
+        .buttonStyle(PanelControlStyle())
+        .help(label).accessibilityLabel(label)
     }
 }
 
