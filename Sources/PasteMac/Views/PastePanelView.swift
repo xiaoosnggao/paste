@@ -117,88 +117,105 @@ struct PastePanelView: View {
             } else if case .error = notice {
                 Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange).accessibilityHidden(true)
             }
-            Text(notice.text).font(.system(size: 11)).lineLimit(2)
+            Text(notice.text).font(.scaled(.caption)).lineLimit(2)
             if model.storageError != nil {
-                Button("重试保存", action: model.retrySave).buttonStyle(.plain).foregroundStyle(Color.accentColor)
+                Button("重试保存", action: model.retrySave).buttonStyle(.plain).foregroundStyle(PanelPalette.accent)
             } else if notice != .copied {
                 Button { model.notice = nil; model.pasteIssue = nil } label: { Image(systemName: "xmark") }
                     .buttonStyle(.plain).accessibilityLabel("关闭提示")
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: DesignTokens.Radius.lg))
         .padding(.horizontal, 22).padding(.bottom, 10)
     }
 
+    /// Fixed controls stay at their natural size; the search field takes up to
+    /// its ideal width next; the collection strip gets whatever is left and
+    /// only turns into a scroll view when its pills no longer fit.
     private var toolbar: some View {
-        GeometryReader { geometry in
-            let available = max(0, geometry.size.width - 140)
-            let searchWidth = min(180, available * 0.35)
-            let controlsWidth: CGFloat = model.isSearchVisible ? 240 + searchWidth : 192
-            let boardWidth = min(620, boardToolbarWidth, max(0, available - controlsWidth))
-            ZStack(alignment: .trailing) {
-                HStack(spacing: PanelMetrics.toolbarSpacing) {
-                    Button { model.usesRecommendations.toggle() } label: {
-                        Image(systemName: "sparkles").font(.system(size: 15)).frame(width: PanelMetrics.controlSize, height: PanelMetrics.controlSize).contentShape(Rectangle())
-                    }.buttonStyle(PanelControlStyle(selected: model.usesRecommendations)).focusEffectDisabled().help("按当前应用和最近使用情况推荐")
-                    .accessibilityLabel("智能推荐")
-                    .accessibilityValue(model.usesRecommendations ? "已开启" : "未开启")
-                    Button { model.isSearchVisible.toggle() } label: {
-                        Image(systemName: "magnifyingglass").font(.system(size: 15, weight: .medium)).frame(width: PanelMetrics.controlSize, height: PanelMetrics.controlSize).contentShape(Rectangle())
-                    }.buttonStyle(PanelControlStyle(selected: model.isSearchVisible)).focusEffectDisabled().help("搜索 ⌘F")
-                    .accessibilityLabel("搜索")
-                    Button { model.performTool(.screenshotOCR) } label: {
-                        Label("截图", systemImage: "camera.viewfinder")
-                            .font(.system(size: 12, weight: .medium)).frame(width: 64, height: PanelMetrics.controlSize).contentShape(Rectangle())
-                    }.buttonStyle(PanelControlStyle()).focusEffectDisabled().help("截图识别")
-                    if model.isSearchVisible {
-                        PanelInputField(placeholder: "搜索或描述要找的内容", text: $model.queryString, focused: $searchFocused,
-                                        onSubmit: model.submitHistorySearch,
-                                        onCancel: { model.isSearchVisible = false; model.queryString = ""; searchFocused = false })
-                            .padding(.horizontal, 9).frame(width: searchWidth, height: PanelMetrics.controlSize)
-                            .modifier(PasteboardInputSurface(focused: searchFocused))
-                            .onAppear { searchFocused = true }
-                        filterMenu
-                    }
-                    ScrollView(.horizontal) {
-                        HStack(spacing: 6) {
-                            boardPill("剪贴板", id: nil, color: .blue)
-                            ForEach(model.snapshot.pinboards) { board in
-                                if renamingBoard == board.id {
-                                    PanelInputField(placeholder: "名称", text: $renameText,
-                                                    focused: Binding(get: { boardNameFocused == board.id },
-                                                                     set: { boardNameFocused = $0 ? board.id : nil }),
-                                                    onSubmit: { finishRename(board.id) },
-                                                    onCancel: { renamingBoard = nil; boardNameFocused = nil })
-                                        .padding(.horizontal, 9).frame(width: 115, height: PanelMetrics.controlSize)
-                                        .modifier(PasteboardInputSurface(focused: boardNameFocused == board.id))
-                                } else {
-                                    boardPill(board.name, id: board.id, color: Color(hex: board.colorHex))
-                                        .contextMenu {
-                                            Button("重命名") { beginRename(board.id, name: board.name) }
-                                            Button("自动归类设置…") { classificationBoard = board }
-                                            Button("向左移动") { model.movePinboard(board.id, delta: -1) }
-                                            Button("向右移动") { model.movePinboard(board.id, delta: 1) }
-                                            Button("删除收藏夹…", role: .destructive) { pendingBoardDeletion = board }
-                                        }
-                                        .dropDestination(for: String.self) { values, _ in
-                                            model.selectedIDs = Set(values.compactMap(UUID.init(uuidString:)))
-                                            model.pinSelection(to: board.id)
-                                            return true
-                                        }
-                                }
-                            }
-                        }
-                    }.scrollIndicators(.never).frame(width: boardWidth, height: PanelMetrics.controlSize)
-                    Button(action: createBoard) {
-                        Image(systemName: "plus").frame(width: PanelMetrics.controlSize, height: PanelMetrics.controlSize).contentShape(Rectangle())
-                    }.buttonStyle(PanelControlStyle()).focusEffectDisabled().help("新建收藏夹")
-                    .accessibilityLabel("新建收藏夹")
-                }.frame(width: min(available, controlsWidth + boardWidth), height: PanelMetrics.toolbarHeight)
-                    .frame(maxWidth: .infinity)
-                appMenu.padding(.trailing, PanelMetrics.toolbarTrailingPadding)
+        ZStack(alignment: .trailing) {
+            HStack(spacing: PanelMetrics.toolbarSpacing) {
+                toolbarControls.fixedSize()
+                if model.isSearchVisible {
+                    PanelInputField(placeholder: "搜索或描述要找的内容", text: $model.queryString, focused: $searchFocused,
+                                    onSubmit: model.submitHistorySearch,
+                                    onCancel: { model.isSearchVisible = false; model.queryString = ""; searchFocused = false })
+                        .padding(.horizontal, 9)
+                        .frame(minWidth: PanelMetrics.searchFieldMinWidth, idealWidth: PanelMetrics.searchFieldIdealWidth,
+                               maxWidth: PanelMetrics.searchFieldIdealWidth)
+                        .frame(height: PanelMetrics.controlSize)
+                        .modifier(PasteboardInputSurface(focused: searchFocused))
+                        .onAppear { searchFocused = true }
+                        .layoutPriority(1)
+                    filterMenu
+                }
+                ViewThatFits(in: .horizontal) {
+                    boardStrip.fixedSize(horizontal: true, vertical: false)
+                    ScrollView(.horizontal) { boardStrip }.scrollIndicators(.never)
+                }
+                .frame(height: PanelMetrics.controlSize)
+                Button(action: createBoard) {
+                    Image(systemName: "plus").frame(width: PanelMetrics.controlSize, height: PanelMetrics.controlSize).contentShape(Rectangle())
+                }.buttonStyle(PanelControlStyle()).focusEffectDisabled().help("新建收藏夹")
+                .accessibilityLabel("新建收藏夹")
             }
-        }.frame(height: PanelMetrics.toolbarHeight)
+            // Centered in the panel, but never under the trailing menu (mirrored on the leading side).
+            .padding(.horizontal, PanelMetrics.toolbarTrailingPadding + PanelMetrics.controlSize + PanelMetrics.toolbarSpacing)
+            .frame(maxWidth: .infinity)
+            appMenu.padding(.trailing, PanelMetrics.toolbarTrailingPadding)
+        }
+        .frame(height: PanelMetrics.toolbarHeight)
+    }
+
+    private var toolbarControls: some View {
+        HStack(spacing: PanelMetrics.toolbarSpacing) {
+            Button { model.usesRecommendations.toggle() } label: {
+                Image(systemName: "sparkles").font(.scaled(.title)).frame(width: PanelMetrics.controlSize, height: PanelMetrics.controlSize).contentShape(Rectangle())
+            }.buttonStyle(PanelControlStyle(selected: model.usesRecommendations)).focusEffectDisabled().help("按当前应用和最近使用情况推荐")
+            .accessibilityLabel("智能推荐")
+            .accessibilityValue(model.usesRecommendations ? "已开启" : "未开启")
+            Button { model.isSearchVisible.toggle() } label: {
+                Image(systemName: "magnifyingglass").font(.scaled(.title, weight: .medium)).frame(width: PanelMetrics.controlSize, height: PanelMetrics.controlSize).contentShape(Rectangle())
+            }.buttonStyle(PanelControlStyle(selected: model.isSearchVisible)).focusEffectDisabled().help("搜索 ⌘F")
+            .accessibilityLabel("搜索")
+            Button { model.performTool(.screenshotOCR) } label: {
+                Label("截图", systemImage: "camera.viewfinder")
+                    .font(.scaled(.label, weight: .medium))
+                    .padding(.horizontal, DesignTokens.Space.sm).frame(height: PanelMetrics.controlSize).contentShape(Rectangle())
+            }.buttonStyle(PanelControlStyle()).focusEffectDisabled().help("截图识别")
+        }
+    }
+
+    private var boardStrip: some View {
+        HStack(spacing: 6) {
+            boardPill("剪贴板", id: nil, color: .blue)
+            ForEach(model.snapshot.pinboards) { board in
+                if renamingBoard == board.id {
+                    PanelInputField(placeholder: "名称", text: $renameText,
+                                    focused: Binding(get: { boardNameFocused == board.id },
+                                                     set: { boardNameFocused = $0 ? board.id : nil }),
+                                    onSubmit: { finishRename(board.id) },
+                                    onCancel: { renamingBoard = nil; boardNameFocused = nil })
+                        .padding(.horizontal, 9).frame(width: PanelMetrics.boardRenameWidth, height: PanelMetrics.controlSize)
+                        .modifier(PasteboardInputSurface(focused: boardNameFocused == board.id))
+                } else {
+                    boardPill(board.name, id: board.id, color: Color(hex: board.colorHex))
+                        .contextMenu {
+                            Button("重命名") { beginRename(board.id, name: board.name) }
+                            Button("自动归类设置…") { classificationBoard = board }
+                            Button("向左移动") { model.movePinboard(board.id, delta: -1) }
+                            Button("向右移动") { model.movePinboard(board.id, delta: 1) }
+                            Button("删除收藏夹…", role: .destructive) { pendingBoardDeletion = board }
+                        }
+                        .dropDestination(for: String.self) { values, _ in
+                            model.selectedIDs = Set(values.compactMap(UUID.init(uuidString:)))
+                            model.pinSelection(to: board.id)
+                            return true
+                        }
+                }
+            }
+        }
     }
 
     private func createBoard() {
@@ -221,16 +238,6 @@ struct PastePanelView: View {
         boardNameFocused = nil
     }
 
-    private var boardToolbarWidth: CGFloat {
-        let font = NSFont.systemFont(ofSize: 12, weight: .semibold)
-        let clipboardWidth = ("剪贴板" as NSString).size(withAttributes: [.font: font]).width + 26
-        let widths = model.snapshot.pinboards.map { board -> CGFloat in
-            if renamingBoard == board.id { return 115 }
-            return min(160, (board.name as NSString).size(withAttributes: [.font: font]).width + 39)
-        }
-        return clipboardWidth + widths.reduce(0, +) + CGFloat(widths.count) * 6
-    }
-
     private func boardPill(_ title: String, id: UUID?, color: Color) -> some View {
         let selected = model.selectedPinboardID == id
         return Button { model.selectedPinboardID = id; model.selectedIDs = [] } label: {
@@ -239,11 +246,11 @@ struct PastePanelView: View {
                     Circle().fill(color).frame(width: 7, height: 7)
                         .overlay(Circle().strokeBorder(selected ? Color.white.opacity(0.8) : .clear, lineWidth: 1))
                 }
-                Text(title).font(.system(size: 12, weight: selected ? .semibold : .medium))
+                Text(title).font(.scaled(.label, weight: selected ? .semibold : .medium))
                     .lineLimit(1).truncationMode(.tail)
             }
             .foregroundStyle(selected ? PanelPalette.selectionText : PanelPalette.text)
-            .padding(.horizontal, 13).frame(height: PanelMetrics.controlSize).frame(maxWidth: 160)
+            .padding(.horizontal, 13).frame(height: PanelMetrics.controlSize).frame(maxWidth: PanelMetrics.boardPillMaxWidth)
             .background(selected ? PanelPalette.selection : PanelPalette.raised, in: Capsule())
             .overlay(Capsule().strokeBorder(selected ? PanelPalette.border : PanelPalette.border.opacity(0.45), lineWidth: 0.75))
             .contentShape(Capsule())
@@ -315,7 +322,7 @@ struct PastePanelView: View {
             Button("导入备份…", action: model.importBackup)
             Divider()
             Button("设置…", action: model.openSettings)
-        } label: { Image(systemName: "ellipsis").font(.system(size: 19, weight: .bold)).frame(width: PanelMetrics.controlSize, height: PanelMetrics.controlSize).contentShape(Rectangle()) }
+        } label: { Image(systemName: "ellipsis").font(.scaled(.heading, weight: .bold)).frame(width: PanelMetrics.controlSize, height: PanelMetrics.controlSize).contentShape(Rectangle()) }
         .menuStyle(.borderlessButton).menuIndicator(.hidden).focusEffectDisabled().frame(width: PanelMetrics.controlSize, height: PanelMetrics.controlSize)
         .help("更多操作")
         .accessibilityLabel("更多操作")
@@ -384,7 +391,7 @@ struct PastePanelView: View {
         let filtering = !model.queryString.isEmpty || model.filter != ClipFilter()
         let inPinboard = model.selectedPinboardID != nil
         return VStack(spacing: 10) {
-            Image(systemName: filtering ? "magnifyingglass" : (inPinboard ? "folder" : "clipboard")).font(.system(size: 35, weight: .light)).foregroundStyle(.secondary)
+            Image(systemName: filtering ? "magnifyingglass" : (inPinboard ? "folder" : "clipboard")).font(.scaled(.hero, weight: .light)).foregroundStyle(.secondary)
             Text(filtering ? "未找到匹配卡片" : (inPinboard ? "收藏夹为空" : "暂无剪贴板记录")).font(.headline)
             Text(filtering ? "更换关键词或清除筛选。" : (inPinboard ? "将卡片拖入此收藏夹。" : "复制的内容会显示在这里。")) .font(.subheadline).foregroundStyle(.secondary)
             if filtering {
@@ -407,12 +414,12 @@ struct ClipCard: View {
                 SourceIcon(item: item, selected: selected).frame(width: 24, height: 24)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(item.sourceName.isEmpty ? "剪贴板" : item.sourceName)
-                        .font(.system(size: 12, weight: .medium)).lineLimit(1)
-                    Text(item.kind.displayName).font(.system(size: 11)).foregroundStyle(selected ? PanelPalette.selectionSecondaryText : PanelPalette.secondaryText)
+                        .font(.scaled(.label, weight: .medium)).lineLimit(1)
+                    Text(item.kind.displayName).font(.scaled(.caption)).foregroundStyle(selected ? PanelPalette.selectionSecondaryText : PanelPalette.secondaryText)
                 }
                 Spacer(minLength: 4)
                 TimelineView(.periodic(from: .now, by: 60)) { context in
-                    Text(relativeTime(now: context.date)).font(.system(size: 10))
+                    Text(relativeTime(now: context.date)).font(.scaled(.micro))
                         .foregroundStyle(selected ? PanelPalette.selectionSecondaryText : PanelPalette.secondaryText).lineLimit(1)
                 }
             }.padding(.horizontal, 12).frame(height: PanelMetrics.cardHeaderHeight).background(selected ? PanelPalette.selection : (hovered ? PanelPalette.hover : PanelPalette.raised))
@@ -420,29 +427,29 @@ struct ClipCard: View {
                 if item.kind == .image {
                     CardThumbnail(item: item)
                         .frame(maxHeight: item.enrichment == nil ? .infinity : 72)
-                    if let ocr = item.enrichment?.ocr { Text(ocr.text).font(.system(size: 11)).lineLimit(2) }
+                    if let ocr = item.enrichment?.ocr { Text(ocr.text).font(.scaled(.caption)).lineLimit(2) }
                 } else if item.kind == .color {
-                    RoundedRectangle(cornerRadius: 12).fill(Color(hex: item.text)).overlay(Text(item.text).font(.system(.title3, design: .monospaced)).shadow(radius: 2))
+                    RoundedRectangle(cornerRadius: DesignTokens.Radius.lg).fill(Color(hex: item.text)).overlay(Text(item.text).font(.system(.title3, design: .monospaced)).shadow(radius: 2))
                 } else if item.kind == .file {
-                    Image(systemName: "doc.fill").font(.system(size: 36)).foregroundStyle(selected ? PanelPalette.selectionSecondaryText : PanelPalette.secondaryText)
-                    Text(item.title.isEmpty ? item.filePaths.first ?? "文件" : item.title).font(.system(size: 16, weight: .medium)).lineLimit(3)
+                    Image(systemName: "doc.fill").font(.scaled(.hero)).foregroundStyle(selected ? PanelPalette.selectionSecondaryText : PanelPalette.secondaryText)
+                    Text(item.title.isEmpty ? item.filePaths.first ?? "文件" : item.title).font(.scaled(.title, weight: .medium)).lineLimit(3)
                 } else {
-                    Text(item.text).font(.system(size: 13)).lineSpacing(3).lineLimit(item.enrichment == nil ? 7 : 3).frame(maxWidth: .infinity, alignment: .topLeading)
+                    Text(item.text).font(.scaled(.body)).lineSpacing(3).lineLimit(item.enrichment == nil ? 7 : 3).frame(maxWidth: .infinity, alignment: .topLeading)
                 }
                 if let translation = item.enrichment?.translation {
-                    Text(translation.translatedText).font(.system(size: 11)).lineLimit(2).foregroundStyle(selected ? PanelPalette.selectionSecondaryText : PanelPalette.secondaryText)
+                    Text(translation.translatedText).font(.scaled(.caption)).lineLimit(2).foregroundStyle(selected ? PanelPalette.selectionSecondaryText : PanelPalette.secondaryText)
                 }
                 if item.enrichment != nil { ClipEnrichmentBadge(item: item) }
                 if let category = categories.first {
                     Label(category.name + (categories.count > 1 ? " +\(categories.count - 1)" : ""), systemImage: "folder")
-                        .font(.system(size: 10)).foregroundStyle(selected ? PanelPalette.selectionSecondaryText : PanelPalette.secondaryText).lineLimit(1)
+                        .font(.scaled(.micro)).foregroundStyle(selected ? PanelPalette.selectionSecondaryText : PanelPalette.secondaryText).lineLimit(1)
                 }
                 Spacer(minLength: 0)
                 HStack {
                     Text(item.kind == .file ? "\(item.filePaths.count) 个文件" : "\(item.enrichment?.ocr?.text.count ?? item.characterCount) 个字符").lineLimit(1)
                     Spacer()
                     if index < 9 { Text("⌘\(index + 1)") }
-                }.font(.system(size: 10)).foregroundStyle(selected ? PanelPalette.selectionSecondaryText : PanelPalette.secondaryText)
+                }.font(.scaled(.micro)).foregroundStyle(selected ? PanelPalette.selectionSecondaryText : PanelPalette.secondaryText)
             }.padding(PanelMetrics.cardContentPadding).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .background(selected ? PanelPalette.selection : PanelPalette.surface)
         }.frame(width: PanelMetrics.cardWidth, height: PanelMetrics.cardHeight).foregroundStyle(selected ? PanelPalette.selectionText : PanelPalette.text)
@@ -541,10 +548,10 @@ private struct HistoryPagerTile: View {
                     ProgressView().controlSize(.small)
                 } else {
                     Image(systemName: direction == .newer ? "chevron.left" : "chevron.right")
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.scaled(.title, weight: .semibold))
                 }
                 Text(loading ? "读取中" : (direction == .newer ? "较新" : "更早"))
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.scaled(.label, weight: .medium))
             }
             .foregroundStyle(PanelPalette.secondaryText)
             .frame(width: 72, height: PanelMetrics.cardHeight)

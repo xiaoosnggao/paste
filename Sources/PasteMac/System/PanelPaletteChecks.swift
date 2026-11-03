@@ -10,6 +10,7 @@ enum PanelPaletteChecks {
             guard let appearance = NSAppearance(named: name) else { continue }
             var minimumRatio = Double.infinity
             var canvasLuminance = Double.infinity
+            var indicatorRatio = 0.0
             appearance.performAsCurrentDrawingAppearance {
                 func luminance(_ color: Color) -> Double {
                     let rgb = NSColor(color).usingColorSpace(.sRGB)!
@@ -35,6 +36,17 @@ enum PanelPaletteChecks {
                     minimumRatio = min(minimumRatio, (selected + 0.05) / (value + 0.05))
                     count += 1
                 }
+                func ratio(_ a: Color, _ b: Color) -> Double {
+                    let x = luminance(a), y = luminance(b)
+                    return (max(x, y) + 0.05) / (min(x, y) + 0.05)
+                }
+                // Labels on prominent buttons.
+                minimumRatio = min(minimumRatio, ratio(PanelPalette.onAccent, PanelPalette.accent))
+                count += 1
+                // The selection ring is a non-text indicator: WCAG 1.4.11 asks for 3:1.
+                indicatorRatio = min(ratio(PanelPalette.selectionBorder, PanelPalette.selection),
+                                     ratio(PanelPalette.selectionBorder, PanelPalette.surface))
+                count += 1
             }
             let dark = name == .darkAqua
             guard dark ? canvasLuminance < 0.10 : canvasLuminance > 0.7 && canvasLuminance < 0.90 else {
@@ -42,6 +54,7 @@ enum PanelPaletteChecks {
             }
             count += 1
             guard minimumRatio >= 4.5 else { throw SystemChecks.Failure(message: "Panel text contrast below 4.5:1 in \(name.rawValue): \(minimumRatio)") }
+            guard indicatorRatio >= 3 else { throw SystemChecks.Failure(message: "Selection ring contrast below 3:1 in \(name.rawValue): \(indicatorRatio)") }
         }
         return count
     }

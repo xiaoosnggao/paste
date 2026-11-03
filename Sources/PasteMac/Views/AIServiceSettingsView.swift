@@ -105,7 +105,7 @@ struct AIServiceSettingsView: View {
     private func serviceCard(item: AIServiceConfig) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                Text(item.name).font(.system(size: 14, weight: .bold))
+                Text(item.name).font(.scaled(.body, weight: .bold))
                 Text(item.vendor.title)
                     .font(.caption2).padding(.horizontal, 6).padding(.vertical, 2)
                     .background(Color.accentColor.opacity(0.12), in: Capsule())
@@ -155,8 +155,8 @@ struct AIServiceSettingsView: View {
             }
         }
         .padding(10)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.secondary.opacity(0.15), lineWidth: 1))
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.5), in: RoundedRectangle(cornerRadius: DesignTokens.Radius.md))
+        .overlay(RoundedRectangle(cornerRadius: DesignTokens.Radius.md).strokeBorder(Color.secondary.opacity(0.15), lineWidth: 1))
     }
 
     private func testService(_ service: AIServiceConfig) {

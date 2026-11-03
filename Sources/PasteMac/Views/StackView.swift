@@ -12,7 +12,7 @@ struct StackView: View {
             }
             if model.stackItems.isEmpty {
                 VStack(spacing: 10) {
-                    Image(systemName: "square.stack.3d.up").font(.system(size: 35)).foregroundStyle(.secondary)
+                    Image(systemName: "square.stack.3d.up").font(.scaled(.hero)).foregroundStyle(.secondary)
                     Text("添加卡片后，按顺序逐项粘贴")
                     Button("添加所选卡片") { model.setStack(model.selectedItems) }.disabled(model.selectedItems.isEmpty)
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)

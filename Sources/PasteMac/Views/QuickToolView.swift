@@ -40,10 +40,10 @@ struct QuickToolView: View {
 
     private var titlebar: some View {
         HStack(spacing: 8) {
-            Text("识别与翻译").font(.system(size: 12, weight: .semibold)).allowsHitTesting(false)
+            Text("识别与翻译").font(.scaled(.label, weight: .semibold)).allowsHitTesting(false)
             ToolWindowDragRegion().frame(maxWidth: .infinity).frame(height: 38)
-            if model.isDemo { Text("DEMO").font(.system(size: 9, weight: .medium)).foregroundStyle(.tertiary) }
-            Image(systemName: "lock.shield").font(.system(size: 11)).foregroundStyle(.tertiary)
+            if model.isDemo { Text("DEMO").font(.scaled(.micro, weight: .medium)).foregroundStyle(.tertiary) }
+            Image(systemName: "lock.shield").font(.scaled(.caption)).foregroundStyle(.tertiary)
                 .help("系统服务在本机处理；云服务仅接收当前图片或文字。")
             ToolIconButton(symbol: "slider.horizontal.3", label: "服务设置") { model.onSettings?() }
             ToolIconButton(symbol: model.toolPinned ? "pin.fill" : "pin", label: "固定窗口 ⌘P", active: model.toolPinned) { model.toolPinned.toggle() }
@@ -56,7 +56,7 @@ struct QuickToolView: View {
                 Button("截图识别") { model.performTool(.screenshotOCR) }
                 Button("截图翻译") { model.performTool(.screenshotTranslate) }
             } label: {
-                Label("截图翻译", systemImage: "camera.viewfinder").font(.system(size: 12, weight: .medium))
+                Label("截图翻译", systemImage: "camera.viewfinder").font(.scaled(.label, weight: .medium))
             } primaryAction: { model.performTool(.screenshotTranslate) }
                 .fixedSize().controlSize(.small).help("框选屏幕区域后自动识别并翻译")
             Divider().frame(height: 12)
@@ -77,7 +77,7 @@ struct QuickToolView: View {
                     }
                 } label: {
                     Label(shortName(model.toolConfiguration.ocrProviderTitle), systemImage: "viewfinder")
-                        .font(.system(size: 11, weight: .medium))
+                        .font(.scaled(.caption, weight: .medium))
                 }.menuStyle(.borderlessButton).fixedSize()
                 Divider().frame(height: 12).padding(.horizontal, 2)
             }
@@ -97,10 +97,10 @@ struct QuickToolView: View {
                 }
             } label: {
                 Label(shortName(model.toolConfiguration.translationProviderTitle), systemImage: "character.bubble")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.scaled(.caption, weight: .medium))
             }.menuStyle(.borderlessButton).fixedSize()
             Spacer(minLength: 8)
-            Image(systemName: "arrow.right").font(.system(size: 10)).foregroundStyle(.tertiary)
+            Image(systemName: "arrow.right").font(.scaled(.micro)).foregroundStyle(.tertiary)
             Picker("目标语言", selection: $model.toolConfiguration.targetLanguage) {
                 Text("简体中文").tag("zh"); Text("英语").tag("en"); Text("日语").tag("ja")
                 Text("韩语").tag("ko"); Text("繁体中文").tag("zh-Hant"); Text("法语").tag("fr")
@@ -115,12 +115,12 @@ struct QuickToolView: View {
                     withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { expandedImage.toggle() }
                 } label: {
                     thumbnail.frame(width: 84, height: 52).clipped()
-                        .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 7))
+                        .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))
                 }.buttonStyle(.plain).help("展开原图")
                     .popover(isPresented: $expandedImage, arrowEdge: .top) {
                         thumbnail.frame(width: 360, height: 240).padding(12)
                     }
-                Text("截图").font(.system(size: 12, weight: .medium))
+                Text("截图").font(.scaled(.label, weight: .medium))
                 Spacer(minLength: 4)
                 Button("重新识别并翻译") {
                     if let item { model.recognizeItem(item) }
@@ -129,8 +129,8 @@ struct QuickToolView: View {
                 ToolIconButton(symbol: "doc.on.doc", label: "复制原图") { if let item { model.copyToolOriginal(item) } }
             }
         }.padding(10)
-            .background(Color(nsColor: .textBackgroundColor).opacity(reduceTransparency ? 1 : 0.3), in: RoundedRectangle(cornerRadius: 8))
-            .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(Color(nsColor: .separatorColor).opacity(0.6), lineWidth: 0.5) }
+            .background(Color(nsColor: .textBackgroundColor).opacity(reduceTransparency ? 1 : 0.3), in: RoundedRectangle(cornerRadius: DesignTokens.Radius.md))
+            .overlay { RoundedRectangle(cornerRadius: DesignTokens.Radius.md).strokeBorder(Color(nsColor: .separatorColor).opacity(0.6), lineWidth: 0.5) }
     }
 
     @ViewBuilder private var thumbnail: some View {
@@ -144,7 +144,7 @@ struct QuickToolView: View {
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
-                    Text(hasImage ? "识别文字" : "原文").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                    Text(hasImage ? "识别文字" : "原文").font(.scaled(.caption, weight: .semibold)).foregroundStyle(.secondary)
                     Spacer()
                     if dirty {
                         ToolIconButton(symbol: "checkmark", label: "保存修改") { _ = model.saveToolInput() }
@@ -156,7 +156,7 @@ struct QuickToolView: View {
                 ZStack(alignment: .topLeading) {
                     if model.toolInputText.isEmpty {
                         Text(hasImage ? "等待识别文字…" : "输入或粘贴文字…")
-                            .font(.system(size: 14)).foregroundStyle(.tertiary)
+                            .font(.scaled(.body)).foregroundStyle(.tertiary)
                             .allowsHitTesting(false)
                     }
                     ToolSourceEditor(text: model.toolInputText, focused: $sourceFocused,
@@ -164,14 +164,14 @@ struct QuickToolView: View {
                         model.editToolInput(text, isComposing: composing)
                     }
                 }.frame(minHeight: 130, maxHeight: .infinity)
-                Text("\(model.toolInputText.count) 个字符").font(.system(size: 10).monospacedDigit()).foregroundStyle(.tertiary)
+                Text("\(model.toolInputText.count) 个字符").font(.scaled(.micro).monospacedDigit()).foregroundStyle(.tertiary)
             }.padding(12).frame(width: (geometry.size.width - 1) / 2, height: geometry.size.height)
             Rectangle().fill(Color(nsColor: .separatorColor).opacity(0.6)).frame(width: 1)
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
-                    Text(staleTranslation ? "译文 · 待更新" : "译文").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                    Text(staleTranslation ? "译文 · 待更新" : "译文").font(.scaled(.caption, weight: .semibold)).foregroundStyle(.secondary)
                     if staleTranslation {
-                        Image(systemName: "arrow.clockwise").font(.system(size: 10)).foregroundStyle(.orange).help("原文或翻译设置已更改")
+                        Image(systemName: "arrow.clockwise").font(.scaled(.micro)).foregroundStyle(.orange).help("原文或翻译设置已更改")
                     }
                     Spacer()
                     ToolIconButton(symbol: copied == "translation" ? "checkmark" : "doc.on.doc", label: "复制译文") {
@@ -180,32 +180,32 @@ struct QuickToolView: View {
                 }.frame(height: 26)
                 if let translation {
                     ScrollView {
-                        Text(translation.translatedText).font(.system(size: 14)).lineSpacing(5)
+                        Text(translation.translatedText).font(.scaled(.body)).lineSpacing(5)
                             .textSelection(.enabled).fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
                     }.frame(minHeight: 130, maxHeight: .infinity)
                 } else {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(model.toolBusy ? "正在处理…" : "等待翻译…")
-                            .font(.system(size: 14)).foregroundStyle(.tertiary)
+                            .font(.scaled(.body)).foregroundStyle(.tertiary)
                         if !model.toolBusy {
-                            Text("↩ 翻译 · ⇧↩ 换行").font(.system(size: 10)).foregroundStyle(.tertiary)
+                            Text("↩ 翻译 · ⇧↩ 换行").font(.scaled(.micro)).foregroundStyle(.tertiary)
                         }
                         Spacer()
                     }.padding(.top, 7).frame(maxWidth: .infinity, minHeight: 130, maxHeight: .infinity, alignment: .topLeading)
                 }
                 Text(translation.map { shortName($0.provider) } ?? " ")
-                    .font(.system(size: 10)).foregroundStyle(.tertiary).lineLimit(1)
+                    .font(.scaled(.micro)).foregroundStyle(.tertiary).lineLimit(1)
             }.padding(12).frame(width: (geometry.size.width - 1) / 2, height: geometry.size.height)
         }
-        .background(Color(nsColor: .textBackgroundColor).opacity(reduceTransparency ? 1 : 0.3), in: RoundedRectangle(cornerRadius: 10))
-        .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(Color(nsColor: .separatorColor).opacity(0.7), lineWidth: 0.5) }
+        .background(Color(nsColor: .textBackgroundColor).opacity(reduceTransparency ? 1 : 0.3), in: RoundedRectangle(cornerRadius: DesignTokens.Radius.lg))
+        .overlay { RoundedRectangle(cornerRadius: DesignTokens.Radius.lg).strokeBorder(Color(nsColor: .separatorColor).opacity(0.7), lineWidth: 0.5) }
         }
     }
 
     private func errorRow(_ error: String) -> some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.orange)
-            Text(error).font(.system(size: 11)).fixedSize(horizontal: false, vertical: true).lineLimit(2).help(error)
+            Text(error).font(.scaled(.caption)).fixedSize(horizontal: false, vertical: true).lineLimit(2).help(error)
             Spacer(minLength: 4)
             Button(model.toolError == nil ? "重试保存" : "重试") {
                 if model.toolError == nil { model.retrySave() } else { model.retryToolOperation() }
@@ -218,7 +218,7 @@ struct QuickToolView: View {
         HStack(spacing: 8) {
             if model.toolBusy { ProgressView().controlSize(.mini) }
             if let message = dirty ? "原文已修改" : model.toolStatus {
-                Text(message).font(.system(size: 10)).foregroundStyle(.secondary)
+                Text(message).font(.scaled(.micro)).foregroundStyle(.secondary)
                     .lineLimit(1).help(message)
             }
             Spacer(minLength: 8)
@@ -229,7 +229,7 @@ struct QuickToolView: View {
                     HStack(spacing: 10) {
                         Text(translation == nil ? "翻译" : "重新翻译")
                         Text("↩").opacity(0.65)
-                    }.font(.system(size: 12, weight: .medium)).padding(.horizontal, 5)
+                    }.font(.scaled(.label, weight: .medium)).padding(.horizontal, 5)
                 }.buttonStyle(.borderedProminent).controlSize(.large).disabled(!hasImage && model.toolInputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     .help("停止输入0.75秒自动翻译；按回车立即翻译")
             }
@@ -316,10 +316,10 @@ private struct ToolIconButton: View {
     @State private var hovering = false
     var body: some View {
         Button(action: action) {
-            Image(systemName: symbol).font(.system(size: 12, weight: .medium))
+            Image(systemName: symbol).font(.scaled(.label, weight: .medium))
                 .foregroundStyle(active ? Color.accentColor : Color.secondary)
                 .frame(width: 27, height: 27)
-                .background((active ? Color.accentColor.opacity(0.1) : Color.primary.opacity(hovering ? 0.06 : 0)), in: RoundedRectangle(cornerRadius: 6))
+                .background((active ? Color.accentColor.opacity(0.1) : Color.primary.opacity(hovering ? 0.06 : 0)), in: RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))
         }.buttonStyle(.plain).help(label).accessibilityLabel(label)
             .onHover { hovering = $0 }
     }

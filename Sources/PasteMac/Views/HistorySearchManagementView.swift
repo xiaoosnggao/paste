@@ -11,9 +11,9 @@ struct HistorySearchManagementView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             HStack(alignment: .top, spacing: 12) {
-                Image(systemName: symbol).font(.system(size: 22, weight: .medium))
+                Image(systemName: symbol).font(.scaled(.display, weight: .medium))
                     .foregroundStyle(preview.intent == .previewDelete ? Color.red : Color.accentColor)
-                    .frame(width: 42, height: 42).background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
+                    .frame(width: 42, height: 42).background(.quaternary, in: RoundedRectangle(cornerRadius: DesignTokens.Radius.lg))
                 VStack(alignment: .leading, spacing: 5) {
                     Text(preview.title).font(.title3.weight(.semibold))
                     Text("\(preview.itemIDs.count) 项内容").font(.subheadline).foregroundStyle(.secondary)
@@ -22,7 +22,7 @@ struct HistorySearchManagementView: View {
             }
             Text(preview.query).font(.body).lineLimit(3)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(12).background(.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 8))
+                .padding(12).background(.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: DesignTokens.Radius.md))
             if let category = preview.categoryName {
                 LabeledContent("目标分类", value: category)
             }

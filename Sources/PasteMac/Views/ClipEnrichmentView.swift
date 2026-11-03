@@ -82,7 +82,7 @@ struct ClipEnrichmentView: View {
                 }
             }.controlSize(.small)
             if editingOCR {
-                TextEditor(text: $ocrDraft).font(.system(size: 13)).frame(minHeight: 90, maxHeight: 150)
+                TextEditor(text: $ocrDraft).font(.scaled(.body)).frame(minHeight: 90, maxHeight: 150)
                     .scrollContentBackground(.hidden).padding(6).focused($ocrFocused)
                     .modifier(PasteboardInputSurface(focused: ocrFocused))
                     .background(InputFocusOnAppear { ocrFocused = true }.frame(width: 0, height: 0))
@@ -106,6 +106,6 @@ struct ClipEnrichmentBadge: View {
             if item.enrichment?.translation != nil {
                 Label(item.translationIsStale ? "需重新翻译" : "已翻译", systemImage: item.translationIsStale ? "exclamationmark.circle" : "character.bubble")
             }
-        }.font(.system(size: 10, weight: .medium))
+        }.font(.scaled(.micro, weight: .medium))
     }
 }

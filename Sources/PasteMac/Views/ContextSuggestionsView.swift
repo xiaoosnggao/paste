@@ -10,7 +10,7 @@ struct ContextSuggestionsView: View {
             if model.selectedIDs.count > 1 {
                 VStack(alignment: .leading, spacing: 7) {
                     HStack {
-                        Text("已选 \(model.selectedIDs.count) 项").font(.system(size: 12, weight: .semibold))
+                        Text("已选 \(model.selectedIDs.count) 项").font(.scaled(.label, weight: .semibold))
                         Spacer()
                         if model.contextSuggestionsLoading {
                             Text(model.contextSuggestionProgress ?? "正在整理所选内容…").font(.caption).foregroundStyle(PanelPalette.secondaryText)
@@ -18,14 +18,14 @@ struct ContextSuggestionsView: View {
                         }
                     }
                     if let summary = model.multiCardSummary {
-                        Text(summary.sentence).font(.system(size: 13)).lineLimit(2)
+                        Text(summary.sentence).font(.scaled(.body)).lineLimit(2)
                         Button(model.multiCardSummaryExpanded ? "收起要点" : "展开要点") {
                             model.multiCardSummaryExpanded.toggle()
                         }.buttonStyle(.plain).foregroundStyle(PanelPalette.accent).font(.caption)
                         ScrollView {
                                 VStack(alignment: .leading, spacing: 6) {
                                     ForEach(Array(summary.facts.enumerated()), id: \.offset) { _, fact in
-                                        Text("• " + readableFact(fact)).font(.system(size: 12)).textSelection(.enabled)
+                                        Text("• " + readableFact(fact)).font(.scaled(.label)).textSelection(.enabled)
                                     }
                                     HStack {
                                         ForEach(summary.sourceIDs, id: \.self) { id in
@@ -69,7 +69,7 @@ struct ContextSuggestionsView: View {
                 context.frame(width: 154, alignment: .leading)
                 if let error = model.contextSuggestionsError {
                     VStack(alignment: .leading, spacing: 9) {
-                        Text(error).font(.system(size: 12)).foregroundStyle(PanelPalette.secondaryText).lineLimit(2)
+                        Text(error).font(.scaled(.label)).foregroundStyle(PanelPalette.secondaryText).lineLimit(2)
                         Button("重新生成", action: model.retryContextSuggestions).buttonStyle(.plain).foregroundStyle(PanelPalette.accent)
                     }.frame(maxWidth: .infinity, alignment: .leading)
                 } else {
@@ -106,11 +106,11 @@ struct ContextSuggestionsView: View {
     private var context: some View {
         VStack(alignment: .leading, spacing: 9) {
             Label("AI 建议", systemImage: "sparkles")
-                .font(.system(size: 16, weight: .semibold)).foregroundStyle(PanelPalette.accent)
+                .font(.scaled(.title, weight: .semibold)).foregroundStyle(PanelPalette.accent)
             VStack(alignment: .leading, spacing: 4) {
                 Text(sourceName).lineLimit(1).truncationMode(.middle)
                 Label(targetName, systemImage: "arrow.turn.down.right").lineLimit(1).truncationMode(.middle)
-            }.font(.system(size: 11)).foregroundStyle(PanelPalette.secondaryText)
+            }.font(.scaled(.caption)).foregroundStyle(PanelPalette.secondaryText)
         }.help("来源：\(sourceName)\n目标：\(targetName)")
     }
 
@@ -146,22 +146,22 @@ private struct SuggestionOptionCard: View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 9) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(suggestion.title).foregroundStyle(applying ? PanelPalette.selectionText : PanelPalette.text).font(.system(size: 15, weight: .semibold)).lineLimit(1)
+                    Text(suggestion.title).foregroundStyle(applying ? PanelPalette.selectionText : PanelPalette.text).font(.scaled(.title, weight: .semibold)).lineLimit(1)
                     Spacer(minLength: 0)
                     Text(applying ? "处理中" : "⌥\(index + 1)")
-                        .font(.system(size: 10, weight: .medium)).foregroundStyle(applying ? PanelPalette.selectionSecondaryText : PanelPalette.secondaryText)
+                        .font(.scaled(.micro, weight: .medium)).foregroundStyle(applying ? PanelPalette.selectionSecondaryText : PanelPalette.secondaryText)
                 }
                 Text(suggestion.detail)
-                    .font(.system(size: 12)).foregroundStyle(applying ? PanelPalette.selectionSecondaryText : PanelPalette.secondaryText)
+                    .font(.scaled(.label)).foregroundStyle(applying ? PanelPalette.selectionSecondaryText : PanelPalette.secondaryText)
                     .lineSpacing(3).lineLimit(2, reservesSpace: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(15).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .background(surface, in: RoundedRectangle(cornerRadius: 13))
-            .overlay(RoundedRectangle(cornerRadius: 13)
+            .background(surface, in: RoundedRectangle(cornerRadius: DesignTokens.Radius.lg))
+            .overlay(RoundedRectangle(cornerRadius: DesignTokens.Radius.lg)
                 .strokeBorder(applying || hovered ? PanelPalette.accent.opacity(0.5) : PanelPalette.border.opacity(0.6), lineWidth: 0.7))
-            .overlay { if applying { SuggestionShimmer(delay: 0).clipShape(RoundedRectangle(cornerRadius: 13)).allowsHitTesting(false) } }
-            .contentShape(RoundedRectangle(cornerRadius: 13))
+            .overlay { if applying { SuggestionShimmer(delay: 0).clipShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.lg)).allowsHitTesting(false) } }
+            .contentShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.lg))
         }
         .buttonStyle(.plain).disabled(disabled)
         .onHover { hovered = $0 }
@@ -181,16 +181,16 @@ private struct SuggestionSkeletonCard: View {
     var body: some View {
         GeometryReader { geometry in
             VStack(alignment: .leading, spacing: 13) {
-                RoundedRectangle(cornerRadius: 4).fill(PanelPalette.skeleton).frame(width: geometry.size.width * 0.54, height: 14)
+                RoundedRectangle(cornerRadius: DesignTokens.Radius.xs).fill(PanelPalette.skeleton).frame(width: geometry.size.width * 0.54, height: 14)
                 VStack(alignment: .leading, spacing: 7) {
-                    RoundedRectangle(cornerRadius: 3).fill(PanelPalette.skeleton.opacity(0.65)).frame(height: 9)
-                    RoundedRectangle(cornerRadius: 3).fill(PanelPalette.skeleton.opacity(0.65)).frame(width: geometry.size.width * 0.72, height: 9)
+                    RoundedRectangle(cornerRadius: DesignTokens.Radius.xs).fill(PanelPalette.skeleton.opacity(0.65)).frame(height: 9)
+                    RoundedRectangle(cornerRadius: DesignTokens.Radius.xs).fill(PanelPalette.skeleton.opacity(0.65)).frame(width: geometry.size.width * 0.72, height: 9)
                 }
             }.padding(15)
         }
-        .background(PanelPalette.surface, in: RoundedRectangle(cornerRadius: 13))
-        .overlay(RoundedRectangle(cornerRadius: 13).strokeBorder(PanelPalette.border.opacity(0.6), lineWidth: 0.7))
-        .overlay { SuggestionShimmer(delay: Double(index) * 0.14).clipShape(RoundedRectangle(cornerRadius: 13)) }
+        .background(PanelPalette.surface, in: RoundedRectangle(cornerRadius: DesignTokens.Radius.lg))
+        .overlay(RoundedRectangle(cornerRadius: DesignTokens.Radius.lg).strokeBorder(PanelPalette.border.opacity(0.6), lineWidth: 0.7))
+        .overlay { SuggestionShimmer(delay: Double(index) * 0.14).clipShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.lg)) }
         .accessibilityHidden(true)
     }
 }

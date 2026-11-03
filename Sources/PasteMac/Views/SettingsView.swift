@@ -47,7 +47,7 @@ struct SettingsView: View {
                 ForEach(SettingsPage.allCases) { entry in
                     Button { page = entry } label: {
                         Label(entry.rawValue, systemImage: entry.symbol)
-                            .font(.system(size: 13)).frame(maxWidth: .infinity, alignment: .leading)
+                            .font(.scaled(.body)).frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, 12).padding(.vertical, 6)
                             .contentShape(Rectangle())
                     }.buttonStyle(PanelControlStyle(selected: page == entry)).focusEffectDisabled()
@@ -61,7 +61,7 @@ struct SettingsView: View {
             }.padding(.horizontal, 10).frame(width: 200)
                 .background(Color(nsColor: .windowBackgroundColor).opacity(reduceTransparency ? 1 : 0.12))
             VStack(alignment: .leading, spacing: 0) {
-                Text(page.rawValue).font(.system(size: 16, weight: .bold)).padding(.horizontal, 25).padding(.top, 20).padding(.bottom, 12)
+                Text(page.rawValue).font(.scaled(.title, weight: .bold)).padding(.horizontal, 25).padding(.top, 20).padding(.bottom, 12)
                 Form {
                     if let error = model.storageError {
                         Section("保存失败") {

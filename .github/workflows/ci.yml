@@ -24,6 +24,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Design tokens
+        # Font sizes and corner radii come from DesignTokens.swift.
+        run: |
+          if grep -RnE '\.system\(size: *[0-9]|cornerRadius: *[0-9]' Sources --include='*.swift' | grep -v '/DesignTokens.swift:'; then
+            echo "::error::Use DesignTokens (Font.scaled / DesignTokens.Radius) instead of literal font sizes or corner radii."
+            exit 1
+          fi
+
       - name: Build app and App Intents metadata
         run: scripts/build-app.sh debug
 

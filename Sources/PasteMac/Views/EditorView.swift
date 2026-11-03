@@ -30,7 +30,7 @@ struct EditorView: View {
                 Text("富文本").font(.caption).foregroundStyle(.secondary)
             }.buttonStyle(.borderless)
             RichTextEditor(value: $value, controller: editor)
-                .padding(8).modifier(PasteboardInputSurface(focused: editor.focused, cornerRadius: 10))
+                .padding(8).modifier(PasteboardInputSurface(focused: editor.focused, cornerRadius: DesignTokens.Radius.lg))
                 .background(InputFocusOnAppear {
                     guard let view = editor.textView else { return }
                     view.window?.makeFirstResponder(view)

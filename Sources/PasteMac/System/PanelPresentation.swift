@@ -56,7 +56,7 @@ final class PanelFrameAnimator {
 @MainActor
 final class PanelAnimationContainer: NSView {
     let surface: NSView
-    init(surface: NSView, frame: NSRect, cornerRadius: CGFloat = 25) {
+    init(surface: NSView, frame: NSRect, cornerRadius: CGFloat = DesignTokens.Radius.panel) {
         self.surface = surface
         super.init(frame: frame)
         wantsLayer = true
@@ -71,7 +71,7 @@ final class PanelAnimationContainer: NSView {
 
 @MainActor
 enum PanelGlassContainer {
-    static func make<Content: View>(content: Content, frame: NSRect, cornerRadius: CGFloat = 25,
+    static func make<Content: View>(content: Content, frame: NSRect, cornerRadius: CGFloat = DesignTokens.Radius.panel,
                                     reduceTransparency: Bool? = nil) -> NSView {
         let hosting = NSHostingView(rootView: content)
         hosting.frame = NSRect(origin: .zero, size: frame.size)

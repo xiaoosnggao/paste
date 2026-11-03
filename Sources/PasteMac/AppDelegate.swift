@@ -266,7 +266,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         value.styleMask.insert(.fullSizeContentView)
         value.isReleasedWhenClosed = false
         value.isOpaque = false; value.backgroundColor = .clear
-        value.contentView = PanelGlassContainer.make(content: view, frame: NSRect(origin: .zero, size: size), cornerRadius: 14)
+        value.contentView = PanelGlassContainer.make(content: view, frame: NSRect(origin: .zero, size: size), cornerRadius: DesignTokens.Radius.window)
         value.center()
         value.delegate = self
         return value
@@ -556,7 +556,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             value.isOpaque = false; value.backgroundColor = .clear
             value.minSize = NSSize(width: 560, height: 480)
             value.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .canJoinAllApplications]
-            value.contentView = PanelGlassContainer.make(content: QuickToolView(model: model), frame: frame, cornerRadius: 14)
+            value.contentView = PanelGlassContainer.make(content: QuickToolView(model: model), frame: frame, cornerRadius: DesignTokens.Radius.window)
             value.delegate = self; toolWindow = value
         }
         guard let toolWindow else { return }
