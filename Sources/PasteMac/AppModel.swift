@@ -149,6 +149,8 @@ final class AppModel: ObservableObject {
     var onPreview: ((ClipItem) -> Void)?
     var onIntelligence: ((ClipItem) -> Void)?
     var onStack: (() -> Void)?
+    /// Called after each 粘贴下一项 attempt so the capsule can move to the cursor.
+    var onStackPasted: (() -> Void)?
     var onShortcut: ((UInt32, UInt32) -> Bool)?
     var onStackShortcut: ((UInt32, UInt32) -> Bool)?
 
@@ -455,11 +457,18 @@ final class AppModel: ObservableObject {
         snapshot = next
         persist()
     }
+    /// The stack in paste order: 倒序粘贴 pastes from the end.
+    var orderedStackItems: [ClipItem] { stackReversed ? Array(stackItems.reversed()) : stackItems }
+    /// 1-based paste position of each stacked card, for the deck's order badges.
+    var stackPositions: [UUID: Int] {
+        Dictionary(orderedStackItems.enumerated().map { ($0.element.id, $0.offset + 1) }, uniquingKeysWith: { first, _ in first })
+    }
     func pasteNextStack() {
         guard let next = stackReversed ? stackItems.last : stackItems.first else { return }
         paste([next]) { [weak self] successful in
-            guard successful, let self else { return }
-            self.setStack(self.stackItems.filter { $0.id != next.id })
+            guard let self else { return }
+            if successful { self.setStack(self.stackItems.filter { $0.id != next.id }) }
+            self.onStackPasted?()
         }
     }
     func undo() { undoManager.undo(); selectFirstIfNeeded() }
