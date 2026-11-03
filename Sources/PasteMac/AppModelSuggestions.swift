@@ -64,7 +64,7 @@ extension AppModel {
 
     func currentContextSuggestionKey() -> ContextSuggestionRequestKey? {
         // The detail layer and the suggestions bar share the space above the panel's bottom edge.
-        guard suggestionSessionActive, panelDetail == nil, toolConfiguration.contextSuggestionsEnabled,
+        guard suggestionSessionActive, toolConfiguration.contextSuggestionsEnabled,
               (!isDemo || suggestionOperationsInjected), !isPasting, !toolBusy,
               !selectedIDs.isEmpty, let item = selectedItems.first,
               (selectedItems.count > 1 || (!item.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && item.kind != .image && item.kind != .file)),

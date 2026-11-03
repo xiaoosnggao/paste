@@ -45,8 +45,7 @@ struct HistorySearchManagementView: View {
                 Button("取消") { model.historyManagementPreview = nil; dismiss() }
                     .keyboardShortcut(.cancelAction).disabled(applying)
                 Button(actionTitle) { apply() }
-                    .buttonStyle(.borderedProminent)
-                    .tint(preview.intent == .previewDelete ? .red : .accentColor)
+                    .primaryActionStyle(fill: preview.intent == .previewDelete ? .red : PanelPalette.accent)
                     .disabled(applying || preview.error != nil || preview.itemIDs.isEmpty)
             }
         }

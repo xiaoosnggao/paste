@@ -13,22 +13,12 @@ struct PastePanelView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // The panel grows upward from a fixed bottom edge, so the deck stays put
-            // while the detail layer is revealed above it.
-            ZStack(alignment: .bottom) {
-                if let detail = model.panelDetail {
-                    PanelDetailView(model: model, detail: detail)
-                        .padding(.horizontal, PanelMetrics.deckHorizontalPadding)
-                        .padding(.bottom, PanelDetailLayout.spacing)
-                        .transition(.opacity)
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-            .clipped()
+            // Detail pages open in their own window above the panel; the panel keeps its height.
+            Spacer(minLength: 0)
             toolbar
             Color.clear.frame(height: PanelMetrics.toolbarDeckSpacing)
             deck.frame(height: PanelMetrics.deckHeight)
-            if model.contextSuggestionsPresented && model.panelDetail == nil {
+            if model.contextSuggestionsPresented {
                 ContextSuggestionsView(model: model)
                     .frame(height: PanelPresentation.suggestionContentHeight + model.suggestionAdditionalHeight)
                     .padding(.top, PanelPresentation.suggestionSpacing)
@@ -462,6 +452,15 @@ struct ClipCard: View {
     /// Opens a detail page from the hover buttons.
     var onQuickAction: ((PanelDetailPage) -> Void)? = nil
     @State private var hovered = false
+    /// Counts only where they mean something: text length, file count, recognized text.
+    static func footerNote(_ item: ClipItem) -> String? {
+        switch item.kind {
+        case .file: return "\(item.filePaths.count) 个文件"
+        case .image: return item.enrichment?.ocr.map { "\($0.text.count) 个字符" }
+        case .color: return nil
+        default: return "\(item.characterCount) 个字符"
+        }
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
@@ -505,7 +504,7 @@ struct ClipCard: View {
                 }
                 Spacer(minLength: 0)
                 HStack {
-                    Text(item.kind == .file ? "\(item.filePaths.count) 个文件" : "\(item.enrichment?.ocr?.text.count ?? item.characterCount) 个字符").lineLimit(1)
+                    if let note = Self.footerNote(item) { Text(note).lineLimit(1) }
                     Spacer()
                     if index < 9 { Text("⌘\(index + 1)") }
                 }.font(.scaled(.micro)).foregroundStyle(selected ? PanelPalette.selectionSecondaryText : PanelPalette.secondaryText)

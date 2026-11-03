@@ -80,19 +80,16 @@ enum ContextSuggestionModelChecks {
         try await eventually { !context.contextSuggestions.isEmpty }
         try check(await contextCalls.inputs.count == 3, "explicit retry did not refresh the provider result")
 
-        // The detail layer and the suggestions bar share one region and never show together.
+        // Detail pages are windows: the suggestions bar stays as it is while one is open.
         let detailCalls = ContextSuggestionRecorder()
         let detailed = make(detailCalls)
         try await eventually { detailed.contextSuggestionsVisible }
         detailed.openPanelDetail(.intelligence, itemID: source.id)
-        try check(!detailed.contextSuggestionsPresented && detailed.contextSuggestionKey == nil,
-                  "opening detail left the suggestions bar presented")
+        try check(detailed.contextSuggestionsPresented, "opening a detail window hid the suggestions bar")
         try check(detailed.activeHistoryReferences["detail"] == [source.id], "detail did not retain its card's payload")
         detailed.select(other)
         try await settle()
         try check(detailed.panelDetail?.itemID == source.id, "a detail page followed the selection")
-        try check(await detailCalls.inputs.count == 1 && !detailed.contextSuggestionsPresented,
-                  "moving the selection under detail requested suggestions")
         detailed.closePanelDetail()
         try check(detailed.activeHistoryReferences["detail"] == nil, "closing detail kept its payload reference")
         try await eventually { detailed.contextSuggestionsVisible && detailed.contextSuggestions.first?.title == other.text }
@@ -129,8 +126,8 @@ enum ContextSuggestionModelChecks {
         detailed.togglePreview()
         try check(detailed.previewItemID == other.id, "Space did not open the preview window")
         detailed.openFromPreview(.edit, item: other)
-        try check(detailed.previewItemID == nil && calls.reveals == 1 && detailed.panelDetail == PanelDetailState(itemID: other.id, page: .edit),
-                  "编辑 in the preview window did not open the panel's edit page")
+        try check(detailed.previewItemID == nil && detailed.panelDetail == PanelDetailState(itemID: other.id, page: .edit),
+                  "编辑 in the preview window did not open the edit window")
         detailed.cancelPanelEditor()
         detailed.onPreview = nil; detailed.onPreviewClose = nil; detailed.onRevealPanel = nil; detailed.onEditor = nil
 
@@ -144,13 +141,12 @@ enum ContextSuggestionModelChecks {
         detailed.openPanelEditor(source)
         try check(detailed.panelEditorDraft?.title == "draft title", "reopening the editor did not resume the draft")
         detailed.panelDidHide()
-        try check(detailed.panelDetail?.page == .edit, "hiding the panel closed an editor with unsaved changes")
-        try check(!detailed.contextSuggestionsPresented, "suggestions showed beside a kept editor")
+        try check(detailed.panelDetail?.page == .edit, "hiding the panel closed the editor window")
         detailed.cancelPanelEditor()
         try check(detailed.panelDetail == nil && detailed.panelEditorDrafts[source.id] == nil, "Cancel kept the draft")
         detailed.openPanelEditor(source)
-        detailed.panelDidHide()
-        try check(detailed.panelDetail == nil && detailed.panelEditorDrafts.isEmpty, "an unchanged editor outlived the panel")
+        detailed.closePanelDetail()
+        try check(detailed.panelDetail == nil && detailed.panelEditorDrafts.isEmpty, "an unchanged editor kept its draft after closing")
         detailed.openPanelEditor(source)
         detailed.updatePanelEditorDraft(value: NSAttributedString(string: ""), title: "")
         try check(!detailed.savePanelEditor() && detailed.panelDetail?.page == .edit, "⌘S saved an empty text")
@@ -171,7 +167,9 @@ enum ContextSuggestionModelChecks {
         detailed.toolSessionActive = true
         detailed.openPanelDetail(.translate, itemID: other.id)
         detailed.panelDidHide()
-        try check(!detailed.toolSessionActive && detailed.panelDetail == nil, "hiding the panel kept the translate session")
+        try check(detailed.panelDetail?.page == .translate, "hiding the panel closed the translate window")
+        detailed.closePanelDetail()
+        try check(!detailed.toolSessionActive, "closing the translate window kept the tool session")
 
         let latestCalls = ContextSuggestionRecorder(blockSuggestion: true)
         let latest = make(latestCalls)

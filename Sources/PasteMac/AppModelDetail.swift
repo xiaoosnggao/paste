@@ -1,9 +1,9 @@
 import Foundation
 import PasteCore
 
-/// State of the in-panel detail layer. Presentation lives in AppDelegate.
+/// State of the detail window (编辑, 翻译, 智能). Presentation lives in AppDelegate.
 extension AppModel {
-    /// The card the detail layer shows, read live so edits and deletions appear at once.
+    /// The card the detail window shows, read live so edits and deletions appear at once.
     var panelDetailItem: ClipItem? {
         guard let id = panelDetail?.itemID else { return nil }
         return snapshot.items.first { $0.id == id }
@@ -65,7 +65,6 @@ extension AppModel {
     func openFromPreview(_ page: PanelDetailPage, item: ClipItem) {
         guard page != .preview, page.isAvailable(for: item) else { return }
         closePreview()
-        onRevealPanel?()
         if visibleItems.contains(where: { $0.id == item.id }) { select(item) }
         showDetailPage(page, for: item)
     }
@@ -104,8 +103,7 @@ extension AppModel {
     /// The panel hid, for example after an outside click or a paste.
     /// An editor with unsaved changes stays open, so reopening the panel returns to it.
     func panelDidHide() {
-        if let detail = panelDetail, detail.page == .edit, panelEditorDrafts[detail.itemID]?.isDirty == true { return }
-        closePanelDetail()
+        // Detail pages are windows of their own and stay open while the panel hides.
     }
 
     // MARK: Editor page
@@ -173,8 +171,6 @@ extension AppModel {
         if let old, old.page == .edit, panelDetail != old, panelEditorDrafts[old.itemID]?.isDirty != true {
             panelEditorDrafts[old.itemID] = nil
         }
-        // Opening the layer hides the suggestions bar; closing it brings the bar back.
-        if (panelDetail == nil) != (old == nil) { scheduleContextSuggestions() }
         onPanelDetailChange?()
     }
 }
