@@ -53,7 +53,8 @@ struct PastePanelView: View {
                     ScrollView(.horizontal) {
                         LazyHStack(spacing: PanelMetrics.deckSpacing) {
                             if model.historyPageOffset > 0 {
-                                Button("上一页", action: model.loadPreviousHistoryPage).buttonStyle(.bordered)
+                                HistoryPagerTile(direction: .newer, loading: false, action: model.loadPreviousHistoryPage)
+                                    .disabled(model.historyLoading)
                             }
                             ForEach(Array(model.visibleItems.enumerated()), id: \.element.id) { index, item in
                                 ClipCard(item: item, selected: model.selectedIDs.contains(item.id), index: index, categories: model.categories(for: item.id))
@@ -79,9 +80,9 @@ struct PastePanelView: View {
                                     }
                             }
                             if model.historyHasMore {
-                                Button { if let last = model.historyResultIDs.last { model.loadNextHistoryPage(after: last) } } label: {
-                                    Label(model.historyLoading ? "读取中" : "更多", systemImage: "chevron.right")
-                                }.buttonStyle(.bordered).disabled(model.historyLoading)
+                                HistoryPagerTile(direction: .older, loading: model.historyLoading) {
+                                    if let last = model.historyResultIDs.last { model.loadNextHistoryPage(after: last) }
+                                }.disabled(model.historyLoading)
                             }
                         }.padding(.horizontal, PanelMetrics.deckHorizontalPadding).padding(.vertical, PanelMetrics.deckVerticalPadding)
                             .horizontalScrollWheelRouting()
@@ -93,22 +94,40 @@ struct PastePanelView: View {
             }
     }
 
-    @ViewBuilder private var statusNotice: some View {
-        if model.storageError != nil || model.pasteFailureText != nil || (model.statusMessage != nil && model.statusMessage != "已复制") {
-            HStack(spacing: 8) {
-                Text(model.storageError ?? model.pasteFailureText ?? model.statusMessage ?? "")
-                    .font(.system(size: 11)).lineLimit(2)
-                if model.storageError != nil {
-                    Button("重试保存", action: model.retrySave).buttonStyle(.plain).foregroundStyle(Color.accentColor)
-                } else {
-                    Button { model.statusMessage = nil; model.pasteIssue = nil } label: { Image(systemName: "xmark") }
-                        .buttonStyle(.plain).accessibilityLabel("关闭提示")
-                }
+    /// The persistent failure if there is one, otherwise the transient notice.
+    private var visibleNotice: PanelNotice? {
+        if let error = model.storageError ?? model.pasteFailureText { return .error(error) }
+        return model.notice
+    }
+
+    private var statusNotice: some View {
+        ZStack {
+            if let notice = visibleNotice {
+                noticeBanner(notice)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
-            .padding(.horizontal, 12).padding(.vertical, 8)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
-            .padding(.horizontal, 22).padding(.bottom, 10)
         }
+        .animation(.easeOut(duration: 0.2), value: visibleNotice)
+    }
+
+    private func noticeBanner(_ notice: PanelNotice) -> some View {
+        HStack(spacing: 8) {
+            if notice == .copied {
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).accessibilityHidden(true)
+            } else if case .error = notice {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange).accessibilityHidden(true)
+            }
+            Text(notice.text).font(.system(size: 11)).lineLimit(2)
+            if model.storageError != nil {
+                Button("重试保存", action: model.retrySave).buttonStyle(.plain).foregroundStyle(Color.accentColor)
+            } else if notice != .copied {
+                Button { model.notice = nil; model.pasteIssue = nil } label: { Image(systemName: "xmark") }
+                    .buttonStyle(.plain).accessibilityLabel("关闭提示")
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .padding(.horizontal, 22).padding(.bottom, 10)
     }
 
     private var toolbar: some View {
@@ -501,5 +520,41 @@ extension Color {
         } else { alpha = 1 }
         let value = UInt64(text, radix: 16) ?? 0x6F81CE
         self.init(red: Double((value >> 16) & 255) / 255, green: Double((value >> 8) & 255) / 255, blue: Double(value & 255) / 255, opacity: alpha)
+    }
+}
+
+/// Card-height tile at either end of the deck that pages through history,
+/// so paging reads as part of the card row instead of a stray form button.
+private struct HistoryPagerTile: View {
+    enum Direction { case newer, older }
+    let direction: Direction
+    let loading: Bool
+    let action: () -> Void
+    @State private var hovered = false
+    @Environment(\.isEnabled) private var isEnabled
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: PanelMetrics.cardCornerRadius)
+        Button(action: action) {
+            VStack(spacing: 8) {
+                if loading {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: direction == .newer ? "chevron.left" : "chevron.right")
+                        .font(.system(size: 15, weight: .semibold))
+                }
+                Text(loading ? "读取中" : (direction == .newer ? "较新" : "更早"))
+                    .font(.system(size: 12, weight: .medium))
+            }
+            .foregroundStyle(PanelPalette.secondaryText)
+            .frame(width: 72, height: PanelMetrics.cardHeight)
+            .background(hovered && isEnabled ? PanelPalette.hover : PanelPalette.surface.opacity(0.6), in: shape)
+            .overlay(shape.strokeBorder(PanelPalette.border.opacity(hovered && isEnabled ? 0.9 : 0.45), lineWidth: hovered && isEnabled ? 1 : 0.75))
+            .contentShape(shape)
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .help(direction == .newer ? "显示较新的 50 条" : "加载更早的 50 条")
+        .accessibilityLabel(direction == .newer ? "显示较新的记录" : "加载更早的记录")
     }
 }
